@@ -51,6 +51,8 @@ export interface ResponseSpec {
   extract?: ExtractorName;
   /** For JSON responses: keep only these top-level keys. */
   pick?: string[];
+  /** Advice added to the answer when the response's `error` field holds one of these codes. */
+  hints?: Record<string, string>;
 }
 
 export interface ToolSpec {

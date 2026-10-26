@@ -67,7 +67,14 @@ export async function executeSpec(spec: ToolSpec, args: Record<string, unknown>)
       );
     }
 
-    return text(render(extract(result.data, spec.response)));
+    // SFCC reports business failures in a 200 with an `error` code, e.g. NO_SHIPPING_METHOD_SELECTED.
+    const data = extract(result.data, spec.response);
+    const error = typeof data === 'object' && data !== null ? (data as { error?: unknown }).error : undefined;
+    if (typeof error === 'string' && error) {
+      const hint = spec.response?.hints?.[error];
+      return text(`carrefour.it refused ${spec.name}: ${error}${hint ? `\n\n${hint}` : ''}\n\n${render(data)}`, true);
+    }
+    return text(render(data));
   } catch (error) {
     logger.error('Tool execution failed', { tool: spec.name, error: String(error) });
     return text(`Request failed for "${spec.name}": ${(error as Error).message}`, true);

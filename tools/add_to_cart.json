@@ -1,6 +1,6 @@
 {
   "name": "add_to_cart",
-  "description": "Adds a product to the signed-in customer's cart by EAN. Returns the new cart total and item count. To change the quantity of a product already in the cart, use update_cart_item_quantity.",
+  "description": "Adds a product to the signed-in customer's cart by EAN. A delivery method must be selected first (reserve_delivery_timeslot does it). Returns the new cart total and item count. To change the quantity of a product already in the cart, use update_cart_item_quantity.",
   "parameters": {
     "type": "object",
     "properties": {
@@ -59,6 +59,9 @@
       "quantityTotal",
       "totalPrice",
       "subTotalValue"
-    ]
+    ],
+    "hints": {
+      "NO_SHIPPING_METHOD_SELECTED": "No delivery method is selected in this session, so carrefour.it cannot price or reserve the product. Select one first: find_stores with your CAP, then get_delivery_timeslots and reserve_delivery_timeslot for the store and method you want; then retry."
+    }
   }
 }

@@ -128,3 +128,18 @@ test('a public read goes straight out and comes back extracted', async () => {
     { name: 'Latte', url: 'https://www.carrefour.it/spesa-online/latte/' },
   ]);
 });
+
+test('an SFCC error code in a 200 answer is reported as an error, with its hint', async () => {
+  sessionService.importCookies('dwsid=abc');
+  respond = (req) => {
+    if (req.url.includes('Store-SelectionBar')) return selectionBar(true);
+    if (req.url.includes('CSRF-Generate')) return json({ csrf: { token: 'T' } });
+    return json({ quantityTotal: 1, totalPrice: '€ 0,76', message: null, error: 'NO_SHIPPING_METHOD_SELECTED' });
+  };
+
+  const result = await executeSpec(specs.get('add_to_cart')!, { ean: '5000232625830' });
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /refused add_to_cart: NO_SHIPPING_METHOD_SELECTED/);
+  assert.match(result.content[0].text, /reserve_delivery_timeslot/);
+});
