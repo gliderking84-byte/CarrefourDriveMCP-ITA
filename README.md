@@ -10,8 +10,8 @@ A port of [maximeallanic/CarrefourDriveMCP](https://github.com/maximeallanic/Car
 carrefour.it is a Salesforce Commerce Cloud storefront, so every endpoint, the
 login and the response parsing were rewritten from real carrefour.it traffic.
 
-**15 tools.** 11 carrefour.it endpoints described as JSON and run by a generic
-executor, plus 4 session-management tools.
+**19 tools.** 11 carrefour.it endpoints described as JSON and run by a generic
+executor, 4 checkout tools, and 4 session-management tools.
 
 ```
 "Quanto costa il latte senza lattosio?"         → search_products
@@ -182,14 +182,38 @@ none — `add_to_cart` is refused with `NO_SHIPPING_METHOD_SELECTED`.
 🔒 needs a signed-in session, checked before the call · ✍️ changes your account:
 the server fetches a CSRF token (`…/CSRF-Generate`) right before sending it.
 
-Checkout and payment are deliberately **not** exposed.
+### Checkout
+
+| Tool | What it does |
+| --- | --- |
+| `get_addresses` 🔒 | saved delivery addresses (`…/Account-AddressBook`) |
+| `apply_coupon` 🔒✍️ | discount code (`…/CheckoutServices-AddCoupon`) |
+| `prepare_checkout` 🔒✍️ | reserves the slot, opens `/checkout/begin`, submits the address (`/checkout/shipping-submit`), validates it against the delivery CAP and sets the slot (`…/Checkout-UpdateTimeslot`); returns items, delivery cost and total. **Orders nothing.** Home delivery only. |
+| `place_order` 🔒✍️ | **creates the order** (`/checkout/payment`) and opens the payment page in your browser |
+
+Ordering is a two-step, human-approved flow:
+
+1. `prepare_checkout` returns the summary; the agent shows it to you.
+2. Only after you say yes, `place_order` with `confirm: true`. It refuses without
+   it, without a `prepare_checkout` from the last 30 minutes, and never places
+   the same prepared checkout twice.
+3. **You pay.** The order's payment page (Market Pay, then PayPal with its
+   hCaptcha, or your card's 3-D Secure) opens in your browser, on the login
+   profile that holds your carrefour.it session. Strong customer authentication
+   is a human step by design; the server never sees payment credentials.
+
+Only PayPal (`MP_PAYPAL`) is supported so far: it is the only method captured.
 
 ## What is verified
 
-All 15 tools were tested end to end through the MCP server on a real
-carrefour.it account (MCP Inspector, October 2026), and every endpoint was first
-observed in real browser traffic. The response parsers are unit-tested on
-trimmed copies of those responses.
+The 15 catalogue, delivery, cart and session tools were tested end to end
+through the MCP server on a real carrefour.it account (MCP Inspector, October
+2026), and every endpoint was first observed in real browser traffic. The
+response parsers are unit-tested on trimmed copies of those responses.
+
+The 4 checkout tools follow a captured real order call for call, and the whole
+chain is unit-tested against those answers, but they have **not yet been run
+end to end** against the live site.
 
 ## How authentication works
 
@@ -308,8 +332,8 @@ same private endpoints the website uses, with your own session.
 **Is my password stored?** No. You type it in a browser window; only cookies are
 persisted, in `<data>/sessions/cookies.json` with `0600` permissions.
 
-**Can it place an order?** No. It stops at the cart and the timeslot; you check
-out on carrefour.it yourself.
+**Can it place an order?** Yes, after you approve the summary — and you always
+pay yourself, in your browser. Only PayPal is supported so far.
 
 **I captured a HAR to add an endpoint — anything to watch out for?** A HAR of a
 login contains your password in clear text, and HARs carry your address and

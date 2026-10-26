@@ -14,9 +14,14 @@ import type { ExtractorName, ResponseSpec } from './types.js';
 
 export const SITE_ORIGIN = 'https://www.carrefour.it';
 
-/** Keys every SFCC JSON response carries and nobody needs. `queryString` can hold the CSRF token. */
+/**
+ * Keys every SFCC JSON response carries and nobody needs. `queryString` can hold
+ * the CSRF token, and `csrf` is one (Account-AddressBook, Checkout-UpdateTimeslot).
+ */
 const ENVELOPE_KEYS = new Set([
   'action',
+  'csrf',
+  'tracking_consent',
   'queryString',
   'locale',
   'nonce',
@@ -363,6 +368,31 @@ export function extractTimeslots(data: unknown): unknown {
         .sort((a, b) => String(a.start).localeCompare(String(b.start))),
     })),
   };
+}
+
+// --- Errors --------------------------------------------------------------------
+
+/**
+ * The failure an SFCC answer reports despite its HTTP 200: an `error` code
+ * (`NO_SHIPPING_METHOD_SELECTED`), `error: true` with an `errorMessage`, or
+ * per-field form errors (`errorFields` / `fieldErrors`). `null` when it succeeded.
+ */
+export function sfccError(data: unknown): { code?: string; message: string } | null {
+  if (typeof data !== 'object' || data === null) return null;
+  const body = data as Record<string, unknown>;
+  if (typeof body.error === 'string' && body.error) return { code: body.error, message: body.error };
+  if (body.error === true) {
+    const message = typeof body.errorMessage === 'string' ? textOf(body.errorMessage) : 'carrefour.it reported an error';
+    return { message };
+  }
+  for (const key of ['errorFields', 'fieldErrors']) {
+    const fields = body[key];
+    if (fields && typeof fields === 'object' && Object.keys(fields).length > 0) {
+      const messages = Object.entries(fields as Record<string, unknown>).map(([field, msg]) => `${field}: ${textOf(String(msg))}`);
+      return { message: messages.join('; ') };
+    }
+  }
+  return null;
 }
 
 // --- Generic JSON --------------------------------------------------------------

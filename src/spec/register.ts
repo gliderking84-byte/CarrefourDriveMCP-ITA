@@ -3,7 +3,7 @@ import { buildRequest } from './resolve.js';
 import { schemaToZodShape } from './params.js';
 import type { ToolSpec } from './types.js';
 import { loadToolSpecs, type LoadResult } from './loader.js';
-import { extract } from './extract.js';
+import { extract, sfccError } from './extract.js';
 import { httpService, redactUrl } from '../services/http.service.js';
 import { sessionService, NO_SESSION_MESSAGE } from '../services/session.service.js';
 import { getCsrfToken, isLoggedIn } from '../services/auth.service.js';
@@ -67,12 +67,13 @@ export async function executeSpec(spec: ToolSpec, args: Record<string, unknown>)
       );
     }
 
-    // SFCC reports business failures in a 200 with an `error` code, e.g. NO_SHIPPING_METHOD_SELECTED.
+    // SFCC reports business failures in a 200: an error code (NO_SHIPPING_METHOD_SELECTED),
+    // an error flag with a message, or per-field form errors.
+    const failure = sfccError(result.data);
     const data = extract(result.data, spec.response);
-    const error = typeof data === 'object' && data !== null ? (data as { error?: unknown }).error : undefined;
-    if (typeof error === 'string' && error) {
-      const hint = spec.response?.hints?.[error];
-      return text(`carrefour.it refused ${spec.name}: ${error}${hint ? `\n\n${hint}` : ''}\n\n${render(data)}`, true);
+    if (failure) {
+      const hint = failure.code ? spec.response?.hints?.[failure.code] : undefined;
+      return text(`carrefour.it refused ${spec.name}: ${failure.message}${hint ? `\n\n${hint}` : ''}\n\n${render(data)}`, true);
     }
     return text(render(data));
   } catch (error) {
