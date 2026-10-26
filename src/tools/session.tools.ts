@@ -4,6 +4,7 @@ import { sessionService, NO_SESSION_MESSAGE } from '../services/session.service.
 import { forgetLoginState, isLoggedIn } from '../services/auth.service.js';
 import { isPlaywrightAvailable, loginState, startBrowserLogin } from '../services/browser-login.js';
 import { browserService } from '../services/browser.service.js';
+import { dataDir, dataPath } from '../utils/paths.js';
 
 function text(body: string, isError = false) {
   return { content: [{ type: 'text' as const, text: body }], isError };
@@ -70,6 +71,8 @@ export function registerSessionTools(server: McpServer): void {
       let line =
         `Session present: ${status.cookieCount} cookie(s) [${status.cookies.join(', ')}]\n` +
         `File: ${status.sessionFile}\nBrowser profile: ${browser.profile} (${browser.running ? 'running' : 'stopped'})` +
+        `\nData directory: ${dataDir()}` +
+        `\nHTML debug: ${process.env.CARREFOUR_DEBUG_HTML ? `on, pages saved to ${dataPath('debug')}` : 'off (set CARREFOUR_DEBUG_HTML=1)'}` +
         loginStateLine();
 
       if (verify) {
