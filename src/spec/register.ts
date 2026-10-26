@@ -69,7 +69,7 @@ export async function executeSpec(spec: ToolSpec, args: Record<string, unknown>)
 
 /**
  * Register every JSON-declared tool on the MCP server.
- * All 43 endpoints are served by this one generic executor.
+ * All 36 endpoints are served by this one generic executor.
  */
 export function registerSpecTools(server: McpServer, load: LoadResult = loadToolSpecs()): LoadResult {
   for (const spec of load.specs) {

@@ -161,8 +161,20 @@ test('create_shopping_list: POST whose payload lives entirely in the query strin
   assert.equal(req.headers['content-type'], undefined);
 });
 
-test('get_store_information_inserts: multipart body and URL segment', () => {
-  const req = buildRequest(spec('get_store_information_inserts'), {
+test('multipart body and URL segment', () => {
+  const multipart: ToolSpec = {
+    name: 'multipart_fixture',
+    description: 'multipart/form-data request with a path parameter',
+    request: {
+      method: 'POST',
+      url: 'https://www.carrefour.fr/api/information-insert/stores/{store_id}',
+      headers: {},
+      query: {},
+      body: { insertIds: { $param: 'insert_ids' } },
+      content_type: 'multipart/form-data',
+    },
+  };
+  const req = buildRequest(multipart, {
     store_id: '0678',
     insert_ids: ['checkout_top', 'checkout_summary'],
   });

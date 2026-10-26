@@ -5,7 +5,7 @@ Model Context Protocol client search the French grocery catalogue, build a cart,
 pick a Drive pickup or delivery slot, read loyalty points and past receipts — on
 your own Carrefour account.
 
-**48 tools.** 43 real `carrefour.fr` API endpoints described as JSON and run by a
+**41 tools.** 36 real `carrefour.fr` API endpoints described as JSON and run by a
 generic executor, plus 5 session-management tools. Adding an endpoint means
 dropping in a JSON file — no code.
 
@@ -186,9 +186,6 @@ re-injected into the browser profile on every start.
 | `get_products_by_query` | GET /products/query/{query_id} | `query_id` |
 | `get_product_reviews` | GET /product/{ean}/reviews | `ean` |
 | `get_navigation_tree` | GET /navigation | — |
-| `get_marketing_placements` | POST /api/marketing/{placement} | `placement`, `searchTerm`, `categories`, `productFilters` |
-| `get_donation_products` | GET /donation | — |
-| `get_chat_preprompts` | POST ocb.carrefour.fr/preprompts | `modes`, `count`, `navigationCurrentPageTitle`, `navigationCurrentPageType` |
 | `get_eligible_drive_stores` | GET /api/eligibility/drive | `latitude`, `longitude`, `postalCode`, `city` |
 
 ### Cart & checkout
@@ -225,13 +222,9 @@ re-injected into the browser profile on every start.
 | `get_loyalty_order_receipts` | GET /api/user/secured/loyalty/orders/receipts | `loyaltyCardNumber`, `loyaltyCardType` |
 | `get_loyalty_order_receipt_details` | GET /api/user/secured/loyalty/orders/receipt/{gln}/{date_key}/{receipt_number} | `gln`, `date_key`, `receipt_number` |
 | `get_advantage_codes` | GET /api/advantage-code | — |
-| `get_vignettes_products` | GET /api/user/products/vignettes-products | — |
-| `get_olympic_games_prime` | GET /api/user/loyalty/olympic-games/prime | — |
 | `get_account_kpis` | GET /api/user/my-account/kpis | `codes` |
 | `get_user_consents` | GET /api/user/my-account/consents | — |
 | `get_favorite_store` | GET /api/favoritestore | — |
-| `get_store_information_inserts` | POST /api/information-insert/stores/{store_id} | `store_id`, `insert_ids` |
-| `get_homepage_returning_banner` | GET /api/homepage/returningBanner | — |
 | `get_personalized_recommendations` | GET /api/user/recommendation/cdp | — |
 | `get_product_recommendations` | GET /api/recommendations | `context` |
 
