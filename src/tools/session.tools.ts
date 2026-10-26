@@ -2,11 +2,27 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { sessionService, NO_SESSION_MESSAGE } from '../services/session.service.js';
 import { forgetLoginState, isLoggedIn } from '../services/auth.service.js';
-import { browserLogin, isPlaywrightAvailable } from '../services/browser-login.js';
+import { isPlaywrightAvailable, loginState, startBrowserLogin } from '../services/browser-login.js';
 import { browserService } from '../services/browser.service.js';
 
 function text(body: string, isError = false) {
   return { content: [{ type: 'text' as const, text: body }], isError };
+}
+
+/** How long carrefour_browser_login holds the call open before handing the login to the background. */
+const LOGIN_WAIT_MS = parseInt(process.env.CARREFOUR_LOGIN_WAIT_MS || '45000', 10);
+const PROGRESS_EVERY_MS = 5000;
+
+const WINDOW_OPEN_MESSAGE =
+  'A browser window is open on carrefour.it/login. Sign in there and leave it open: it closes by ' +
+  'itself once the session is captured. Then run carrefour_session_status with verify=true to confirm.';
+
+function loginStateLine(): string {
+  const state = loginState();
+  if (state.inProgress) {
+    return `\nLogin window: open since ${state.startedAt!.toLocaleTimeString()}, waiting for you to sign in.`;
+  }
+  return state.lastResult ? `\nLast login: ${state.lastResult}` : '';
 }
 
 export function registerSessionTools(server: McpServer): void {
@@ -46,12 +62,15 @@ export function registerSessionTools(server: McpServer): void {
     },
     async ({ verify }) => {
       const status = sessionService.status();
-      if (!status.authenticated) return text(NO_SESSION_MESSAGE, true);
+      if (!status.authenticated) {
+        return loginState().inProgress ? text(loginStateLine().trim()) : text(NO_SESSION_MESSAGE, true);
+      }
 
       const browser = browserService.describe();
       let line =
         `Session present: ${status.cookieCount} cookie(s) [${status.cookies.join(', ')}]\n` +
-        `File: ${status.sessionFile}\nBrowser profile: ${browser.profile} (${browser.running ? 'running' : 'stopped'})`;
+        `File: ${status.sessionFile}\nBrowser profile: ${browser.profile} (${browser.running ? 'running' : 'stopped'})` +
+        loginStateLine();
 
       if (verify) {
         try {
@@ -83,13 +102,40 @@ export function registerSessionTools(server: McpServer): void {
       'carrefour_browser_login',
       'Opens a browser window on carrefour.it so you can sign in. Solve the captcha and sign in; ' +
         'leave the window open — it closes by itself once the session is captured. ' +
+        'Returns after at most ~45 s even if you are still signing in: the login then completes in the ' +
+        'background, and carrefour_session_status reports it. ' +
         'The login cannot be automated: Cloudflare Turnstile refuses to validate in a driven browser.',
       {},
-      async () => {
+      async (_args, extra) => {
+        const login = startBrowserLogin({});
+        const progressToken = extra._meta?.progressToken;
+
+        // Progress notifications keep clients that reset their timeout on progress from giving up.
+        let ticks = 0;
+        const ticker = setInterval(() => {
+          ticks += 1;
+          if (progressToken === undefined) return;
+          extra
+            .sendNotification({
+              method: 'notifications/progress',
+              params: { progressToken, progress: ticks, message: 'Waiting for you to sign in on carrefour.it…' },
+            })
+            .catch(() => undefined);
+        }, PROGRESS_EVERY_MS);
+
+        let timer: NodeJS.Timeout | undefined;
+        const timeout = new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), LOGIN_WAIT_MS);
+        });
+        const cancelled = new Promise<null>((resolve) => extra.signal.addEventListener('abort', () => resolve(null)));
+
         try {
-          return text(await browserLogin({}));
-        } catch (error) {
-          return text(`Browser login failed: ${(error as Error).message}`, true);
+          const result = await Promise.race([login.done, timeout, cancelled]);
+          if (result !== null) return text(result, result.startsWith('Browser login failed'));
+          return text(login.alreadyRunning ? `Still waiting. ${WINDOW_OPEN_MESSAGE}` : WINDOW_OPEN_MESSAGE);
+        } finally {
+          clearInterval(ticker);
+          clearTimeout(timer);
         }
       }
     );

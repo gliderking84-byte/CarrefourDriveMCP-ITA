@@ -116,6 +116,11 @@ signing in is interactive:
 3. **Don't close the window** — the server notices it left the login page, reads
    the session cookies from memory, checks that carrefour.it sees you as signed
    in, and closes it.
+4. The tool call itself returns after at most ~45 s (`CARREFOUR_LOGIN_WAIT_MS`),
+   sending progress notifications meanwhile, because MCP clients time out long
+   before a human is through a captcha (MCP Inspector: 60 s). If you are still
+   typing, the login simply finishes in the background: run
+   `carrefour_session_status` with `verify: true` afterwards to confirm.
 
 The session is then kept alive while the server runs. If it idles out,
 carrefour.it silently turns it into a guest session; every 🔒 tool checks for
@@ -262,6 +267,7 @@ See `.env.example`. Main variables:
 | `CARREFOUR_SESSION_FILE` | `<data>/sessions/cookies.json` | persisted cookie jar |
 | `CARREFOUR_BROWSER_PROFILE` | `<data>/browser-profile` | persistent Chromium profile |
 | `CARREFOUR_KEEPALIVE_MINUTES` | `20` | session keep-alive period; `0` disables |
+| `CARREFOUR_LOGIN_WAIT_MS` | `45000` | how long `carrefour_browser_login` waits before returning |
 | `CARREFOUR_NAV_TIMEOUT_MS` | `60000` | browser navigation timeout |
 | `CARREFOUR_USER_AGENT` | stock Chrome UA | UA of the transport browser |
 | `CARREFOUR_TOOLS_DIR` | `<project>/tools` | JSON tool definitions directory |

@@ -113,12 +113,23 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
     { stdio: 'ignore', detached: true }
   );
   child.unref();
+  let exited = false;
+  child.once('exit', () => {
+    exited = true;
+  });
+  // Without a listener, a failed spawn (missing executable) would crash the whole server.
+  child.once('error', (error) => {
+    exited = true;
+    logger.error('Could not start the login browser', { executable, error: String(error) });
+  });
 
   let signedIn = false;
   const deadline = Date.now() + waitMs;
   try {
     while (Date.now() < deadline) {
       await sleep(POLL_MS);
+      // The window was closed, or Chromium could not start (no display, missing libraries).
+      if (exited) break;
       let tabs;
       try {
         tabs = await openTabs(port);
@@ -135,7 +146,7 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
 
     if (!signedIn) {
       return (
-        'The login did not complete: the window never left the login page. Run the tool ' +
+        'The login did not complete: the window was closed, or never left the login page. Run the tool ' +
         'again, and leave the window open once you are signed in — closing it discards the session.'
       );
     }
@@ -177,4 +188,45 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
     'Signed in. The session is stored and kept alive while the server runs; after a long idle ' +
     'period carrefour.it expires it and you will have to sign in again.'
   );
+}
+
+export interface LoginState {
+  inProgress: boolean;
+  startedAt?: Date;
+  /** Outcome of the last login attempt, once it finished. */
+  lastResult?: string;
+}
+
+let current: { startedAt: Date; done: Promise<string> } | null = null;
+let lastResult: string | undefined;
+
+/**
+ * Open the login window and watch it in the background. MCP clients give up on
+ * a tool call long before a human is done with a captcha (MCP Inspector after
+ * 60 s), so the tool must not hold the call open for the whole login. Calling
+ * this again while a window is open returns the same attempt instead of a
+ * second window.
+ */
+export function startBrowserLogin(opts: BrowserLoginOptions = {}): {
+  alreadyRunning: boolean;
+  startedAt: Date;
+  done: Promise<string>;
+} {
+  if (current) return { alreadyRunning: true, ...current };
+
+  const startedAt = new Date();
+  const done = browserLogin(opts)
+    .catch((error: unknown) => `Browser login failed: ${(error as Error).message}`)
+    .then((result) => {
+      lastResult = result;
+      current = null;
+      logger.info('Browser login finished', { result });
+      return result;
+    });
+  current = { startedAt, done };
+  return { alreadyRunning: false, startedAt, done };
+}
+
+export function loginState(): LoginState {
+  return current ? { inProgress: true, startedAt: current.startedAt, lastResult } : { inProgress: false, lastResult };
 }
