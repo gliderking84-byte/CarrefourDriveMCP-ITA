@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import type { ToolSpec, HttpMethod } from './types.js';
+import { isExtractorName } from './extract.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -51,6 +52,13 @@ export function validateSpec(raw: unknown): string | null {
   }
   if (spec.parameters && spec.parameters.type !== 'object') {
     return 'parameters schema must be of type "object"';
+  }
+  if (spec.csrf !== undefined && typeof spec.csrf !== 'boolean') return '"csrf" must be a boolean';
+  if (spec.parameters?.properties && 'csrf_token' in spec.parameters.properties) {
+    return '"csrf_token" is reserved: set "csrf": true instead of declaring it';
+  }
+  if (spec.response?.extract !== undefined && !isExtractorName(spec.response.extract)) {
+    return `unknown response extractor "${spec.response.extract}"`;
   }
   return null;
 }

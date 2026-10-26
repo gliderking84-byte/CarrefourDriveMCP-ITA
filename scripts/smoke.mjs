@@ -78,10 +78,7 @@ try {
   if (noSchema.length) fail(`tools without a valid inputSchema: ${noSchema.map((t) => t.name).join(', ')}`);
 
   // Calling an authenticated tool without a session must fail cleanly, not crash.
-  const called = await send(3, 'tools/call', {
-    name: 'get_delivery_timeslots',
-    arguments: { facilityServiceId: '0000-000-000' },
-  });
+  const called = await send(3, 'tools/call', { name: 'get_cart', arguments: {} });
   if (called.error) fail(`tools/call crashed: ${JSON.stringify(called.error)}`);
   console.log(`tools/call OK -> isError=${called.result.isError === true}`);
   console.log(`  first line: ${String(called.result.content[0].text).split('\n')[0]}`);

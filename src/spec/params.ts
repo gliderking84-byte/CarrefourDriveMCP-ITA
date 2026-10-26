@@ -19,7 +19,7 @@ export function propertyToZod(prop: JsonSchemaProperty): ZodTypeAny {
     case 'array':
       return z.array(prop.items ? propertyToZod(prop.items) : z.any());
     case 'object':
-      return z.record(z.any());
+      return z.record(z.string(), z.any());
     default:
       return z.any();
   }

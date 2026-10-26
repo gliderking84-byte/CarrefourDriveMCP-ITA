@@ -1,0 +1,67 @@
+{
+  "name": "add_to_cart",
+  "description": "Adds a product to the signed-in customer's cart by EAN. A delivery method must be selected first (reserve_delivery_timeslot does it). Returns the new cart total and item count. To change the quantity of a product already in the cart, use update_cart_item_quantity.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "ean": {
+        "type": "string",
+        "description": "Product EAN (e.g. '8002580010945')."
+      },
+      "quantity": {
+        "type": "number",
+        "description": "How many units to add (default 1).",
+        "default": 1
+      }
+    },
+    "required": [
+      "ean"
+    ]
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://www.carrefour.it/cart/add-product",
+    "headers": {
+      "accept": "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest"
+    },
+    "query": {},
+    "body": {
+      "pid": {
+        "$param": "ean"
+      },
+      "csrf_token": {
+        "$param": "csrf_token"
+      },
+      "quantity": {
+        "$param": "quantity"
+      },
+      "options": "[]",
+      "shippingMethodId": "",
+      "mainProductInPdp": "false",
+      "fromWishlistTile": "null",
+      "currentListID": "null",
+      "skipnotifications": "false",
+      "subscriptionOptionId": "null",
+      "isPromoBundle": "",
+      "ffCampaignId": ""
+    },
+    "content_type": "multipart/form-data"
+  },
+  "requires_auth": true,
+  "csrf": true,
+  "response": {
+    "extract": "json",
+    "pick": [
+      "error",
+      "message",
+      "productId",
+      "quantityTotal",
+      "totalPrice",
+      "subTotalValue"
+    ],
+    "hints": {
+      "NO_SHIPPING_METHOD_SELECTED": "No delivery method is selected in this session, so carrefour.it cannot price or reserve the product. Select one first: find_stores with your CAP, then get_delivery_timeslots and reserve_delivery_timeslot for the store and method you want; then retry."
+    }
+  }
+}

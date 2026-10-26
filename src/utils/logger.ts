@@ -35,6 +35,6 @@ export const logger = winston.createLogger({
     winston.format.errors({ stack: true }),
     winston.format.json()
   ),
-  defaultMeta: { service: 'carrefour-drive-mcp' },
+  defaultMeta: { service: 'carrefour-it-mcp' },
   transports,
 });

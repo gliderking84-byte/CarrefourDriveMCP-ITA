@@ -1,0 +1,59 @@
+{
+  "name": "update_cart_item_quantity",
+  "description": "Changes the quantity of a product already in the cart by one unit, exactly like the +/- buttons on carrefour.it: decrease=false adds one, decrease=true removes one. Call it several times to change by more. Returns the cart lines and new total.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "ean": {
+        "type": "string",
+        "description": "EAN of a product already in the cart."
+      },
+      "decrease": {
+        "type": "boolean",
+        "description": "true to remove one unit, false to add one."
+      }
+    },
+    "required": [
+      "ean",
+      "decrease"
+    ]
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://www.carrefour.it/cart/updatequantity",
+    "headers": {
+      "accept": "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest"
+    },
+    "query": {
+      "minimumTotalAchieved": "false",
+      "pid": {
+        "$param": "ean"
+      },
+      "decrease": {
+        "$param": "decrease"
+      },
+      "fromCart": "true",
+      "skipnotifications": "false",
+      "reloadCart": "false",
+      "csrf_token": {
+        "$param": "csrf_token"
+      }
+    }
+  },
+  "requires_auth": true,
+  "csrf": true,
+  "response": {
+    "extract": "json",
+    "pick": [
+      "error",
+      "message",
+      "items",
+      "numItems",
+      "totalPrice"
+    ],
+    "hints": {
+      "NO_SHIPPING_METHOD_SELECTED": "No delivery method is selected in this session, so carrefour.it cannot price or reserve the product. Select one first: find_stores with your CAP, then get_delivery_timeslots and reserve_delivery_timeslot for the store and method you want; then retry."
+    }
+  }
+}

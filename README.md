@@ -1,36 +1,42 @@
-# Carrefour Drive MCP — grocery shopping for your AI agent
+# Carrefour Italia MCP — grocery shopping for your AI agent
 
-**MCP server for Carrefour Drive (carrefour.fr).** Let Claude, Cursor, or any
-Model Context Protocol client search the French grocery catalogue, build a cart,
-pick a Drive pickup or delivery slot, read loyalty points and past receipts — on
-your own Carrefour account.
+**MCP server for Carrefour Italia (carrefour.it, Spesa Online).** Let Claude,
+Cursor, or any Model Context Protocol client search the Italian grocery
+catalogue, find the stores that serve your CAP, book a delivery or pickup slot
+and manage your cart — on your own Carrefour account.
 
-**48 tools.** 43 real `carrefour.fr` API endpoints described as JSON and run by a
-generic executor, plus 5 session-management tools. Adding an endpoint means
-dropping in a JSON file — no code.
+A port of [maximeallanic/CarrefourDriveMCP](https://github.com/maximeallanic/CarrefourDriveMCP)
+(carrefour.fr) to carrefour.it. The two sites share nothing but the brand:
+carrefour.it is a Salesforce Commerce Cloud storefront, so every endpoint, the
+login and the response parsing were rewritten from real carrefour.it traffic.
+
+**15 tools.** 11 carrefour.it endpoints described as JSON and run by a generic
+executor, plus 4 session-management tools.
 
 ```
-"What did I buy last month?"            → get_loyalty_order_receipts
-"Refill my usual weekly groceries."     → get_frequent_purchases + add_item_to_cart
-"Cheapest organic pasta under 2 €?"     → search_products
-"Book the Saturday morning Drive slot." → get_delivery_timeslots + select_cart_delivery_slot
+"Quanto costa il latte senza lattosio?"         → search_products
+"Which Carrefour stores deliver to 20121?"      → find_stores
+"Book Saturday morning for home delivery."      → get_delivery_timeslots + reserve_delivery_timeslot
+"Add two packs of Barilla spaghetti n.5."       → search_products + add_to_cart
+"What's in my cart, and am I over the minimum?" → get_cart
 ```
 
-- **Standalone** — no `spectral` binary, no external gateway, no API key. Clone, build, run.
+- **Standalone** — no external gateway, no API key. Clone, build, run.
 - **Cloudflare-proof** — every call is issued from a real Chromium page, because
   nothing else gets a `200`.
-- **Stays logged in** — you log in once in a browser window; the server renews the
-  session by itself through the OAuth2 SSO loop.
+- **Compact answers** — the storefront answers in HTML fragments (a product grid
+  is ~275 kB for 25 products); the server extracts the data the site's own
+  JavaScript reads and hands the model a few kB of JSON.
 
 ---
 
 ## Table of contents
 
 - [Install](#install)
-- [Connect it to your agent](#connect-it-to-your-agent) — [Claude Code](#claude-code) · [Claude Desktop](#claude-desktop) · [Cursor, Windsurf, Zed, VS Code](#cursor-windsurf-zed-vs-code-and-other-mcp-clients)
+- [Connect it to your agent](#connect-it-to-your-agent)
 - [Log in](#log-in)
 - [Tool reference](#tool-reference)
-- [Why a real browser](#why-a-real-browser)
+- [What is verified](#what-is-verified)
 - [How authentication works](#how-authentication-works)
 - [How the executor works](#how-the-executor-works)
 - [Configuration](#configuration)
@@ -41,35 +47,25 @@ dropping in a JSON file — no code.
 
 ## Install
 
-Nothing to clone. Node.js **20+** is the only prerequisite (native `fetch`,
-`FormData`, `node:test`).
+Node.js **20+** is the only prerequisite (native `fetch`, `FormData`, `node:test`).
 
 ```sh
-npx -y github:maximeallanic/CarrefourDriveMCP
+npx -y github:gliderking84-byte/carrefourdrivemcp-ita
 ```
 
 That single command fetches, builds and starts the server on stdio — the first
 run also downloads the Chromium it uses as HTTP transport. Most of the time you
-never type it yourself: you put it in your MCP client config
-([next section](#connect-it-to-your-agent)) and the client runs it for you.
+put it in your MCP client config instead and let the client run it.
 
-Prefer it installed once, globally?
-
-```sh
-npm install -g github:maximeallanic/CarrefourDriveMCP
-carrefour-drive-mcp
-```
-
-Your session, browser profile and logs live in `~/.carrefour-drive-mcp`
-(`$XDG_DATA_HOME/carrefour-drive-mcp` when set), so upgrades never log you out.
-Override with `CARREFOUR_DATA_DIR`.
+Your session, browser profile and logs live in `~/.carrefour-it-mcp`
+(`$XDG_DATA_HOME/carrefour-it-mcp` when set). Override with `CARREFOUR_DATA_DIR`.
 
 <details>
 <summary>From source instead</summary>
 
 ```sh
-git clone https://github.com/maximeallanic/CarrefourDriveMCP.git
-cd CarrefourDriveMCP
+git clone https://github.com/gliderking84-byte/carrefourdrivemcp-ita.git
+cd carrefourdrivemcp-ita
 npm install     # builds, and downloads the Chromium transport
 node dist/index.js
 ```
@@ -83,259 +79,185 @@ A source checkout keeps its data in the repo's own `data/` directory.
 ### Claude Code
 
 ```sh
-claude mcp add carrefour-drive -- npx -y github:maximeallanic/CarrefourDriveMCP
-```
-
-Then, in any session:
-
-```
-> Log me in to Carrefour        (runs carrefour_browser_login)
-> Add 2 L of semi-skimmed milk to my Drive cart
+claude mcp add carrefour-it -- npx -y github:gliderking84-byte/carrefourdrivemcp-ita
 ```
 
 ### Claude Desktop
 
-Edit `claude_desktop_config.json`:
-
-- **macOS** — `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows** — `%APPDATA%\Claude\claude_desktop_config.json`
-- **Linux** — `~/.config/Claude/claude_desktop_config.json`
+Edit `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`,
+Windows: `%APPDATA%\Claude\`, Linux: `~/.config/Claude/`):
 
 ```json
 {
   "mcpServers": {
-    "carrefour-drive": {
+    "carrefour-it": {
       "command": "npx",
-      "args": ["-y", "github:maximeallanic/CarrefourDriveMCP"]
+      "args": ["-y", "github:gliderking84-byte/carrefourdrivemcp-ita"]
     }
   }
 }
 ```
 
-Restart Claude Desktop; the Carrefour tools appear in the tools menu.
-
 > On Windows, use `"command": "cmd"` with
-> `"args": ["/c", "npx", "-y", "github:maximeallanic/CarrefourDriveMCP"]`.
+> `"args": ["/c", "npx", "-y", "github:gliderking84-byte/carrefourdrivemcp-ita"]`.
 
 ### Cursor, Windsurf, Zed, VS Code and other MCP clients
 
-Any client that speaks MCP over stdio takes the same two fields:
-
-```json
-{
-  "command": "npx",
-  "args": ["-y", "github:maximeallanic/CarrefourDriveMCP"]
-}
-```
-
-- **Cursor** — `~/.cursor/mcp.json` (or `.cursor/mcp.json` in a project)
-- **Windsurf** — `~/.codeium/windsurf/mcp_config.json`
-- **VS Code / Copilot** — `.vscode/mcp.json`, under `"servers"`
-- **Zed** — `settings.json`, under `"context_servers"`
-
-Installed globally or cloned instead? Swap in
-`{"command": "carrefour-drive-mcp"}` or
-`{"command": "node", "args": ["/absolute/path/to/dist/index.js"]}`.
-
-Already have cookies? Pass them in an `"env"` block instead of logging in:
-`{"CARREFOUR_COOKIES": "…cookie header…"}`.
+Any client that speaks MCP over stdio takes the same `command` / `args` pair.
+Installed from source? Use `{"command": "node", "args": ["/absolute/path/to/dist/index.js"]}`.
 
 ## Log in
 
-carrefour.fr signs you in with cookies, behind a Cloudflare Turnstile captcha and
-an OTP. So the login is interactive, once:
+carrefour.it gates its login form with a **Cloudflare Turnstile** captcha, so
+signing in is interactive:
 
 1. Ask your agent to run **`carrefour_browser_login`**.
-2. A browser window opens on the Carrefour login page. Type your email, password
-   and the OTP code yourself.
-3. **Don't close the window** — the server detects the end of the OAuth loop,
-   grabs the session cookies from memory and closes it for you.
+2. A browser window opens on the private-customer login page
+   (`carrefour.it/login?type=b2c`). Sign in yourself. The window is your own
+   **Chrome** (or Edge, Brave, Chromium — the first one installed), on a
+   dedicated profile kept in `<data>/login-profile`: Cloudflare's captcha is slow
+   and keeps expiring in Playwright's "Chrome for Testing", which is only the
+   fallback. Point `CARREFOUR_LOGIN_BROWSER` at another executable to choose.
+3. **Don't close the window** — the server notices it left the login page, reads
+   the session cookies from memory, checks that carrefour.it sees you as signed
+   in, and closes it.
+4. The tool call itself returns after at most ~45 s (`CARREFOUR_LOGIN_WAIT_MS`),
+   sending progress notifications meanwhile, because MCP clients time out long
+   before a human is through a captcha (MCP Inspector: 60 s). If you are still
+   typing, the login simply finishes in the background: run
+   `carrefour_session_status` with `verify: true` afterwards to confirm.
 
-From then on the session renews itself silently: the server replays the SSO
-authorize → callback redirect before authenticated calls, after a `401`/`403`,
-and every 30 minutes as a keep-alive. You only log in again when the SSO cookie
-itself expires (24 h max, or 60 min idle) — the tools say so explicitly.
-
-Check the state at any time with `carrefour_session_status` (`verify: true` makes
-a real call).
+The session is then kept alive while the server runs. If it idles out,
+carrefour.it silently turns it into a guest session; every 🔒 tool checks for
+that first and asks you to sign in again.
 
 | Session tool | What it does |
 | --- | --- |
-| `carrefour_browser_login` | open a window to sign in (captcha + OTP) |
-| `carrefour_session_status` | stored cookies, browser profile, SSO time left |
-| `carrefour_refresh_session` | force a renewal (rarely needed — it's automatic) |
+| `carrefour_browser_login` | open a window to sign in |
+| `carrefour_session_status` | stored cookies, browser profile; `verify: true` asks the site whether you are signed in |
 | `carrefour_set_cookies` | import cookies manually (header, JSON map, or JSON array) |
 | `carrefour_clear_session` | wipe the local session |
 
-> For `carrefour_set_cookies`, only the **JSON array** format carries the cookie
-> domain — it's the only one that can supply `c4iamsecuretk`, without which
-> automatic renewal is impossible.
-
-The cookie jar lives in `<data dir>/sessions/cookies.json` (`0600`) and is
-re-injected into the browser profile on every start.
-
 ## Tool reference
 
-### Search & catalogue *(no account needed)*
+All carrefour.it controllers live under
+`/on/demandware.store/Sites-carrefour-IT-Site/it_IT/` (written `…/` below).
+
+### Catalogue *(no account needed)*
 
 | Tool | Endpoint | Required params |
 | --- | --- | --- |
-| `search_products` | GET /s | `q` |
-| `autocomplete_search` | GET /autocomplete | `q` |
-| `get_products_by_gtins` | POST /products | `gtins` |
-| `get_products_by_query` | GET /products/query/{query_id} | `query_id` |
-| `get_product_reviews` | GET /product/{ean}/reviews | `ean` |
-| `get_navigation_tree` | GET /navigation | — |
-| `get_marketing_placements` | POST /api/marketing/{placement} | `placement`, `searchTerm`, `categories`, `productFilters` |
-| `get_donation_products` | GET /donation | — |
-| `get_chat_preprompts` | POST ocb.carrefour.fr/preprompts | `modes`, `count`, `navigationCurrentPageTitle`, `navigationCurrentPageType` |
-| `get_eligible_drive_stores` | GET /api/eligibility/drive | `latitude`, `longitude`, `postalCode`, `city` |
+| `search_products` | GET …/FactFinder-Search | `q` |
+| `browse_category` | GET …/Search-UpdateGrid | `cgid` |
+| `search_suggestions` | GET …/SearchRouter-Suggestions | `q` |
+| `get_product` | GET …/Tile-Show | `ean` |
 
-### Cart & checkout
+Products come back as `{ean, name, brand, price, list_price, discount,
+unit_price, size, category_path, tags, quantity_in_cart, url}`; grids add
+`next_start` for the next page.
+
+### Stores & delivery
 
 | Tool | Endpoint | Required params |
 | --- | --- | --- |
-| `get_cart` | GET /api/cart | — |
-| `add_item_to_cart` | PATCH /api/cart | `ean`, `counter`, `basketServiceId`, `subBasketType` |
-| `add_item_to_cart_by_ean` | PATCH /api/cart/items | `ean`, `basketServiceId`, `subBasketType` |
-| `apply_promo_code_to_cart` | POST /api/cart/promo_code | `code`, `facilityServiceId`, `subBasketType` |
-| `simulate_cart_for_store` | GET /api/cart/simulate | `storeRef` |
-| `get_delivery_timeslots` | GET /api/timeslots | `facilityServiceId` |
-| `select_cart_delivery_slot` | PUT /api/cart/slot | `slotRef`, `storeRef` |
-| `validate_checkout_slot` | POST /api/checkout/{basket_service_type}/validate/slot | `basket_service_type`, `deviceFingerPrintId` |
-| `validate_checkout_summary` | POST /api/checkout/{basket_service_type}/validate/summary | `basket_service_type`, `deviceFingerPrintId` |
-| `get_checkout_recommendations` | GET /api/checkout/recommendations/{facility_id}/{basket_service} | `facility_id`, `basket_service` |
-| `submit_checkout_payment` ⚠️ | POST /api/checkout/payment | `checkout_type`, `device_fingerprint_id`, `payments` |
+| `find_stores` | GET …/Store-Search | `cap`, `city` |
+| `get_delivery_selection` | GET …/Store-ShowTimeslotReserved | — |
+| `get_delivery_timeslots` 🔒 | GET …/TimeSlotApi-GetTimeSlots | `storeId`, `shipmentId`, `cap`, `city` |
+| `reserve_delivery_timeslot` 🔒✍️ | POST …/TimeSlotApi-ReserveTimeSlot | `shippingMethodId`, `timeslotId`, `timeslotStart`, `timeslotEnd`, `timeslotEco`, `storeId`, `cap`, `city` |
 
-> ⚠️ `submit_checkout_payment` **charges a real payment**. Four of its parameters
-> were captured as query string while their description suggests HTTP headers —
-> check against a real trace before using it in production.
+Shipping methods: `delivery` (Consegna a casa), `pickup_in_store` (Ritiro in
+negozio), `drive` (Ritiro al Drive). A reservation lasts 45 minutes and also
+selects the store the cart is priced for. **Reserve a slot before adding to the
+cart**: in a session with no delivery method chosen — a fresh login window has
+none — `add_to_cart` is refused with `NO_SHIPPING_METHOD_SELECTED`.
 
-### Account, orders & loyalty
+### Cart
 
 | Tool | Endpoint | Required params |
 | --- | --- | --- |
-| `get_orders` | GET /api/user/orders | — |
-| `get_last_orders` | GET /api/user/orders/last | — |
-| `get_frequent_purchases` | GET /mon-compte/achats-frequents | — |
-| `get_loyalty_balance` | GET /api/user/secured/loyalty/balance | — |
-| `get_loyalty_cards` | GET /api/user/secured/loyalty/my-cards | — |
-| `get_loyalty_coupons_dashboard` | GET /api/user/loyalty/coupons-dashboard | — |
-| `get_loyalty_coupon_collection` | GET /api/user/loyalty/coupon-collection | — |
-| `get_loyalty_order_receipts` | GET /api/user/secured/loyalty/orders/receipts | `loyaltyCardNumber`, `loyaltyCardType` |
-| `get_loyalty_order_receipt_details` | GET /api/user/secured/loyalty/orders/receipt/{gln}/{date_key}/{receipt_number} | `gln`, `date_key`, `receipt_number` |
-| `get_advantage_codes` | GET /api/advantage-code | — |
-| `get_vignettes_products` | GET /api/user/products/vignettes-products | — |
-| `get_olympic_games_prime` | GET /api/user/loyalty/olympic-games/prime | — |
-| `get_account_kpis` | GET /api/user/my-account/kpis | `codes` |
-| `get_user_consents` | GET /api/user/my-account/consents | — |
-| `get_favorite_store` | GET /api/favoritestore | — |
-| `get_store_information_inserts` | POST /api/information-insert/stores/{store_id} | `store_id`, `insert_ids` |
-| `get_homepage_returning_banner` | GET /api/homepage/returningBanner | — |
-| `get_personalized_recommendations` | GET /api/user/recommendation/cdp | — |
-| `get_product_recommendations` | GET /api/recommendations | `context` |
+| `get_cart` 🔒 | GET …/Minicart-Show | — |
+| `add_to_cart` 🔒✍️ | POST /cart/add-product | `ean` (`quantity` defaults to 1) |
+| `update_cart_item_quantity` 🔒✍️ | GET /cart/updatequantity | `ean`, `decrease` |
 
-### Shopping lists
+🔒 needs a signed-in session, checked before the call · ✍️ changes your account:
+the server fetches a CSRF token (`…/CSRF-Generate`) right before sending it.
 
-| Tool | Endpoint | Required params |
-| --- | --- | --- |
-| `get_shopping_lists` | GET /api/shopping-lists | — |
-| `get_shopping_list` | GET /api/shopping-lists-id/{list_id} | `list_id` |
-| `create_shopping_list` | POST /api/shopping-lists/memo-list | `title` |
+Checkout and payment are deliberately **not** exposed.
 
-## Why a real browser
+## What is verified
 
-carrefour.fr sits behind a Cloudflare *managed challenge* that fingerprints the
-client. Measured from one IP, on the same day:
-
-| Client | `GET /api/cart` |
-| --- | --- |
-| `fetch` (undici) | `403 cf-mitigated: challenge`, **on the very first request** |
-| `curl` | `200` for a few calls, then `403` |
-| Chrome | `200` |
-
-No amount of header tweaking changes that: the only viable transport is a
-browser. And the requests must be issued **from a page** — Playwright's
-`APIRequestContext` uses a Node HTTP stack and gets blocked like `fetch`.
-
-So the server keeps a persistent Chromium and runs every API call as a `fetch`
-inside a page parked on the target origin (one page per origin, because of CORS).
-It runs **windowless**, but not in standard headless mode:
-
-| Launch mode | Result |
-| --- | --- |
-| `headless: true` (headless shell) | `403` — the UA announces `HeadlessChrome` |
-| `headless: false` | `200` |
-| `channel: 'chromium'` + masked UA + `--disable-blink-features=AutomationControlled` | `200`, `navigator.webdriver` is `false` |
-
-The last line is what ships.
+All 15 tools were tested end to end through the MCP server on a real
+carrefour.it account (MCP Inspector, October 2026), and every endpoint was first
+observed in real browser traffic. The response parsers are unit-tested on
+trimmed copies of those responses.
 
 ## How authentication works
 
-Two distinct cookie systems:
+carrefour.it is a Salesforce Commerce Cloud (SFRA) storefront. The whole
+session — guest or signed in — lives in SFCC cookies on `www.carrefour.it`.
+There is no separate identity provider and no refresh token.
 
-| Domain | Role | Lifetime |
-| --- | --- | --- |
-| `moncompte.carrefour.fr` | ForgeRock SSO, cookie **`c4iamsecuretk`** | 24 h max, dies after **60 min idle** |
-| `www.carrefour.fr` | store session (`HttpOnly` cookies) | short, renewable |
-
-Login is interactive because of two constraints: the form is behind a
-**Cloudflare Turnstile** captcha that refuses to validate in a CDP-driven
-browser, and `c4iamsecuretk` is a **session cookie** Chromium never writes to
-disk. So the window is a plain Chromium with a debug port open but **nothing
-attached** until login finishes; the server polls the tab over plain HTTP on
-`/json/list` (no CDP domain enabled, so no automation trace), attaches the moment
-the OAuth loop lands back on the store, and reads the cookies **from memory**.
-
-Renewal afterwards is a plain navigation — Chromium follows the redirects and
-sets the cookies itself:
-
-```
-GET moncompte.carrefour.fr/iam/oauth2/CarrefourConnect/authorize?client_id=…&redirect_uri=https://www.carrefour.fr/login/check
-  └─302─► www.carrefour.fr/login/check?code=…   (the BFF exchanges the code)
-      └─302─► www.carrefour.fr/                  (fresh session cookies)
-```
+- **Login** posts to `…/Account-Login` with a Turnstile token only a human in a
+  real browser can produce. The login window is therefore a plain Chromium with
+  a debug port open but **nothing attached** until you are done: the server
+  polls the tab list over plain HTTP (`/json/list`, no CDP domain enabled, so no
+  automation trace), and attaches only once the window has left `/login`. The
+  session cookies are session cookies Chromium never writes to disk, so they are
+  read from memory before the window closes.
+- **Signed-in check** — SFCC never answers `401`: an expired session is just a
+  guest one. `…/Store-SelectionBar` carries `data-option-user-logged`, which the
+  server reads before every authenticated call (cached for 5 minutes) and on
+  `carrefour_session_status verify=true`.
+- **CSRF** — every write needs a token from `POST …/CSRF-Generate`. Tools marked
+  `"csrf": true` get one fetched right before the call, injected as the reserved
+  `{"$param": "csrf_token"}`. Tokens are redacted from logs and stripped from
+  responses.
+- **Keep-alive** — while the browser runs, `…/Store-ShowTimeslotReserved` is
+  read every 20 minutes so the session does not idle out.
 
 ## How the executor works
 
 ```
 tools/*.json ──► loader (validation) ──► params (JSON Schema ➜ zod) ──► MCP tools/list
                                      └─► resolve ($param ➜ URL/query/headers/body)
-                                              └─► http.service (cookies + rate limit + fetch)
+                                              └─► http.service (browser fetch + rate limit)
+                                                       └─► extract (HTML/JSON ➜ compact JSON)
 ```
 
 Every file in `tools/` is self-describing:
 
 ```jsonc
 {
-  "name": "add_item_to_cart",
-  "parameters": { "type": "object", "properties": { … }, "required": [ … ] },
+  "name": "add_to_cart",
+  "parameters": { "type": "object", "properties": { "ean": { … }, "quantity": { "type": "number", "default": 1 } }, "required": ["ean"] },
   "request": {
-    "method": "PATCH",
-    "url": "https://www.carrefour.fr/api/cart",
-    "headers": { … },
-    "query": {},
-    "body": { "items": [ { "ean": { "$param": "ean" }, … } ] },
-    "content_type": "application/json"
+    "method": "POST",
+    "url": "https://www.carrefour.it/cart/add-product",
+    "headers": { "x-requested-with": "XMLHttpRequest", … },
+    "body": { "pid": { "$param": "ean" }, "quantity": { "$param": "quantity" }, "csrf_token": { "$param": "csrf_token" }, … },
+    "content_type": "multipart/form-data"
   },
-  "requires_auth": true
+  "requires_auth": true,
+  "csrf": true,
+  "response": { "extract": "json", "pick": ["error", "message", "quantityTotal", "totalPrice"] }
 }
 ```
 
 The engine (`src/spec/`):
 
-- **recursively substitutes** `{"$param": "name"}` nodes in `headers`, `query`
-  and `body`, preserving the original type (number, boolean, array);
+- **substitutes** `{"$param": "name"}` nodes in `headers`, `query` and `body`,
+  preserving types, and fills parameter `default`s;
 - **drops** placeholders with no argument, so optional params vanish from the
   request instead of being sent as `null`;
-- **fills URL segments** `{basket_service_type}`, `{store_id}`, … with encoding,
-  failing with a clear message when a required segment is missing;
-- **serialises arrays** as repeated query keys (`codes[]=14&codes[]=15`);
 - **encodes the body** per `content_type`: JSON, `x-www-form-urlencoded` or
-  `multipart/form-data` (boundary left to `fetch`);
-- applies a **sliding rate limit** with jitter, plus browser headers.
+  `multipart/form-data`;
+- **extracts** the response (`src/spec/extract.ts`): `product_grid`, `cart`,
+  `suggestions`, `stores`, `timeslots`, or `json` (drops the SFCC envelope —
+  `action`, `nonce`, `queryString`, … — optionally keeps only `pick`ed keys, and
+  flattens fields that contain markup to text).
 
-Adding an endpoint = dropping a new JSON file into `tools/`. No code to write.
+Adding an endpoint = dropping a new JSON file into `tools/`, plus an extractor
+if the site answers in HTML.
 
 ## Configuration
 
@@ -345,16 +267,16 @@ See `.env.example`. Main variables:
 | --- | --- | --- |
 | `CARREFOUR_COOKIES` | — | session cookies (header, JSON map or JSON array) |
 | `CARREFOUR_COOKIE_FILE` | — | path to a JSON cookie export |
-| `CARREFOUR_DATA_DIR` | `~/.carrefour-drive-mcp` (repo `data/` from source) | root of everything written below |
+| `CARREFOUR_DATA_DIR` | `~/.carrefour-it-mcp` (repo `data/` from source) | root of everything written below |
 | `CARREFOUR_SESSION_FILE` | `<data>/sessions/cookies.json` | persisted cookie jar |
 | `CARREFOUR_BROWSER_PROFILE` | `<data>/browser-profile` | persistent Chromium profile |
-| `CARREFOUR_KEEPALIVE_MINUTES` | `30` | SSO keep-alive period; `0` disables |
-| `CARREFOUR_OAUTH_CLIENT_ID` | `carrefour_onecarrefour_web` | OAuth2 client used for refresh |
-| `CARREFOUR_OAUTH_REDIRECT_URI` | `https://www.carrefour.fr/login/check` | BFF callback |
-| `CARREFOUR_OAUTH_SCOPE` | `openid iam` | requested scopes |
+| `CARREFOUR_KEEPALIVE_MINUTES` | `20` | session keep-alive period; `0` disables |
+| `CARREFOUR_LOGIN_WAIT_MS` | `45000` | how long `carrefour_browser_login` waits before returning |
+| `CARREFOUR_LOGIN_BROWSER` | first installed Chrome / Edge / Brave / Chromium | browser executable for the login window |
+| `CARREFOUR_NAV_TIMEOUT_MS` | `60000` | browser navigation timeout |
+| `CARREFOUR_USER_AGENT` | stock Chrome UA | UA of the transport browser |
 | `CARREFOUR_TOOLS_DIR` | `<project>/tools` | JSON tool definitions directory |
 | `CARREFOUR_MAX_RESPONSE_CHARS` | `60000` | truncation of large responses |
-| `REQUEST_TIMEOUT_MS` | `30000` | HTTP timeout |
 | `RATE_LIMIT_REQUESTS` / `RATE_LIMIT_WINDOW_MS` | `10` / `60000` | rate-limit window |
 | `MIN_DELAY_MS` / `MAX_DELAY_MS` | `100` / `500` | jitter between requests |
 | `LOG_LEVEL`, `CARREFOUR_LOG_DIR` | `info`, `<data>` | winston logs (files + stderr, **never stdout**) |
@@ -370,35 +292,28 @@ npm run smoke     # build + real MCP stdio handshake + tools/list
 npm run verify    # all three
 ```
 
-Tests cover `$param` substitution, URL segments, arrays in query strings, the
-three body encodings, and cookie-jar handling. The smoke test actually boots the
-server, performs the JSON-RPC handshake and lists the tools.
+Tests cover request building for every tool, CSRF and session rules, the cookie
+jar, and every response extractor (on trimmed copies of real carrefour.it
+markup). The smoke test boots the server, performs the JSON-RPC handshake and
+lists the tools.
 
-> Network calls to carrefour.fr are **not** tested automatically — they need a
-> real account and valid cookies.
+> Network calls to carrefour.it are **not** tested automatically — they need a
+> real account and a session.
 
 ## FAQ
 
 **Do I need an API key?** No. Carrefour has no public API; this server drives the
 same private endpoints the website uses, with your own session.
 
-**Does it work outside France?** The catalogue and stores are French
-(carrefour.fr). Cloudflare may be stricter from some IPs.
-
 **Is my password stored?** No. You type it in a browser window; only cookies are
-persisted, in `~/.carrefour-drive-mcp/sessions/cookies.json` with `0600`
-permissions. No credential
-lives in this repo, and `data/` and `.env` are gitignored.
+persisted, in `<data>/sessions/cookies.json` with `0600` permissions.
 
-**Can it place a real order?** Yes — `submit_checkout_payment` charges a real
-payment. Treat it accordingly.
+**Can it place an order?** No. It stops at the cart and the timeslot; you check
+out on carrefour.it yourself.
 
-**Can I add endpoints?** Drop a JSON file in `tools/`. See
-[How the executor works](#how-the-executor-works).
-
-**Which clients are supported?** Anything speaking MCP over stdio: Claude Code,
-Claude Desktop, Cursor, Windsurf, VS Code / Copilot, Zed, Continue, custom agents
-using the MCP SDK.
+**I captured a HAR to add an endpoint — anything to watch out for?** A HAR of a
+login contains your password in clear text, and HARs carry your address and
+session tokens. Never commit one (`*.har` is gitignored) and delete it once done.
 
 ## Disclaimer
 
@@ -408,11 +323,4 @@ of service and rate-limit yourself accordingly.
 
 ## License
 
-MIT © Maxime Allanic
-
----
-
-<sub>Keywords: Carrefour MCP server · Carrefour Drive API · Model Context
-Protocol grocery · Claude Desktop MCP · Claude Code MCP server · Cursor MCP ·
-French grocery shopping AI agent · courses en ligne · drive · liste de courses ·
-fidélité Carrefour · MCP shopping cart automation.</sub>
+MIT — see [LICENSE](LICENSE). Based on CarrefourDriveMCP by Maxime Allanic.

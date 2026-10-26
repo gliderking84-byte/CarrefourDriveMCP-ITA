@@ -136,12 +136,22 @@ function encodeBody(
   return { body: JSON.stringify(resolved), contentType: 'application/json' };
 }
 
+/** Fill in the schema defaults for parameters the caller left out. */
+export function withDefaults(spec: ToolSpec, args: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...args };
+  for (const [name, prop] of Object.entries(spec.parameters?.properties ?? {})) {
+    if (out[name] === undefined && prop.default !== undefined) out[name] = prop.default;
+  }
+  return out;
+}
+
 /**
  * Turn a tool spec plus its call arguments into a concrete HTTP request.
  * Pure function — no network, no session. That makes it directly unit-testable.
  */
-export function buildRequest(spec: ToolSpec, args: Record<string, unknown>): BuiltRequest {
+export function buildRequest(spec: ToolSpec, callArgs: Record<string, unknown>): BuiltRequest {
   const req = spec.request;
+  const args = withDefaults(spec, callArgs);
   const url = new URL(substituteUrl(req.url, args));
 
   const query = buildQuery(req.query, args);

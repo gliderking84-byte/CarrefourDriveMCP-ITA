@@ -25,8 +25,8 @@ export function dataDir(): string {
 
   const xdg = process.env.XDG_DATA_HOME;
   return xdg
-    ? join(resolve(xdg), 'carrefour-drive-mcp')
-    : join(homedir(), '.carrefour-drive-mcp');
+    ? join(resolve(xdg), 'carrefour-it-mcp')
+    : join(homedir(), '.carrefour-it-mcp');
 }
 
 export function dataPath(...segments: string[]): string {

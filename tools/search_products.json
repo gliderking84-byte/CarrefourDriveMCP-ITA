@@ -1,16 +1,20 @@
 {
   "name": "search_products",
-  "description": "Searches for products on Carrefour France using a text query. Returns a paginated list of products matching the query, along with pagination metadata, facets for filtering (promotions, Carrefour brands, categories, etc.), total result count, and navigation links. Supports pagination via the page parameter.",
+  "description": "Full-text product search on carrefour.it (Spesa Online), through the FactFinder search the site itself links to. Returns products with EAN, name, brand, price, unit price, size, category and product URL, plus next_start when more results exist. Prices and availability depend on the store selected in the session.",
   "parameters": {
     "type": "object",
     "properties": {
       "q": {
         "type": "string",
-        "description": "The search query/keyword to search for products (e.g. 'isolant', 'tomate', 'yaourt')"
+        "description": "Search text, in Italian (e.g. 'latte', 'tonno', 'pasta integrale')."
       },
-      "page": {
+      "start": {
         "type": "number",
-        "description": "Page number for paginated results (starting from 1)"
+        "description": "Index of the first product to return, for pagination (0, 25, 50, ...). Use next_start from the previous page."
+      },
+      "sz": {
+        "type": "number",
+        "description": "Page size (default 25)."
       }
     },
     "required": [
@@ -19,7 +23,7 @@
   },
   "request": {
     "method": "GET",
-    "url": "https://www.carrefour.fr/s",
+    "url": "https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT/FactFinder-Search",
     "headers": {
       "accept": "application/json, text/plain, */*",
       "x-requested-with": "XMLHttpRequest"
@@ -28,16 +32,16 @@
       "q": {
         "$param": "q"
       },
-      "page": {
-        "$param": "page"
+      "start": {
+        "$param": "start"
+      },
+      "sz": {
+        "$param": "sz"
       }
-    },
-    "body": null,
-    "content_type": "application/json"
+    }
   },
   "requires_auth": false,
-  "example_traces": [
-    "t_002_4231",
-    "t_002_4282"
-  ]
+  "response": {
+    "extract": "product_grid"
+  }
 }

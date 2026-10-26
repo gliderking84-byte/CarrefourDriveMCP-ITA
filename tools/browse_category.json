@@ -1,0 +1,54 @@
+{
+  "name": "browse_category",
+  "description": "Lists the products of a carrefour.it category, page by page. The category ID is the last segment of a category URL: /spesa-online/uova-latte-e-latticini/latte/ -> 'latte'. Returns products with EAN, name, brand, price, unit price and product URL, plus next_start when more pages exist.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "cgid": {
+        "type": "string",
+        "description": "Category ID (e.g. 'latte', 'latte-uht', 'frutta-e-verdura'). search_suggestions returns category URLs to take it from."
+      },
+      "start": {
+        "type": "number",
+        "description": "Index of the first product to return, for pagination (0, 25, 50, ...). Use next_start from the previous page."
+      },
+      "sz": {
+        "type": "number",
+        "description": "Page size (default 25)."
+      },
+      "storeId": {
+        "type": "string",
+        "description": "Optional store ID to price the products for; defaults to the store selected in the session."
+      }
+    },
+    "required": [
+      "cgid"
+    ]
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT/Search-UpdateGrid",
+    "headers": {
+      "accept": "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest"
+    },
+    "query": {
+      "cgid": {
+        "$param": "cgid"
+      },
+      "start": {
+        "$param": "start"
+      },
+      "sz": {
+        "$param": "sz"
+      },
+      "storeId": {
+        "$param": "storeId"
+      }
+    }
+  },
+  "requires_auth": false,
+  "response": {
+    "extract": "product_grid"
+  }
+}

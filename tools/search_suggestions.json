@@ -1,0 +1,40 @@
+{
+  "name": "search_suggestions",
+  "description": "Search-as-you-type suggestions on carrefour.it: matching categories (with their URLs, to use with browse_category) and a few matching products (with EAN). Quick way to find a category ID or a product EAN.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "q": {
+        "type": "string",
+        "description": "Partial search text (e.g. 'latte')."
+      },
+      "storeId": {
+        "type": "string",
+        "description": "Optional store ID; defaults to the store selected in the session."
+      }
+    },
+    "required": [
+      "q"
+    ]
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT/SearchRouter-Suggestions",
+    "headers": {
+      "accept": "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest"
+    },
+    "query": {
+      "q": {
+        "$param": "q"
+      },
+      "storeId": {
+        "$param": "storeId"
+      }
+    }
+  },
+  "requires_auth": false,
+  "response": {
+    "extract": "suggestions"
+  }
+}

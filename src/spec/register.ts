@@ -3,8 +3,10 @@ import { buildRequest } from './resolve.js';
 import { schemaToZodShape } from './params.js';
 import type { ToolSpec } from './types.js';
 import { loadToolSpecs, type LoadResult } from './loader.js';
-import { httpService } from '../services/http.service.js';
+import { extract } from './extract.js';
+import { httpService, redactUrl } from '../services/http.service.js';
 import { sessionService, NO_SESSION_MESSAGE } from '../services/session.service.js';
+import { getCsrfToken, isLoggedIn } from '../services/auth.service.js';
 import { logger } from '../utils/logger.js';
 
 const MAX_RESPONSE_CHARS = parseInt(process.env.CARREFOUR_MAX_RESPONSE_CHARS || '60000', 10);
@@ -27,40 +29,52 @@ function render(data: unknown): string {
 
 /** Execute one declarative tool. Exported so the smoke test can drive it directly. */
 export async function executeSpec(spec: ToolSpec, args: Record<string, unknown>): Promise<ToolResult> {
-  // An SSO cookie alone is enough: httpService rebuilds the storefront session
-  // before the request goes out.
-  if (spec.requires_auth && !sessionService.hasSession() && !sessionService.hasSso()) {
+  if (spec.requires_auth && !sessionService.hasSession()) {
     return text(NO_SESSION_MESSAGE, true);
   }
 
-  let request;
   try {
-    request = buildRequest(spec, args);
-  } catch (error) {
-    return text(`Could not build the request for "${spec.name}": ${(error as Error).message}`, true);
-  }
+    // SFCC never answers 401: an expired session is silently a guest one, which
+    // would show an empty cart or take a write into an anonymous one.
+    if (spec.requires_auth && (await isLoggedIn()) === false) {
+      return text(`carrefour.it no longer sees you as signed in, so ${spec.name} was not sent.\n\n${NO_SESSION_MESSAGE}`, true);
+    }
 
-  try {
+    // The token is a reserved argument: templates read it as {"$param": "csrf_token"}.
+    const callArgs = spec.csrf ? { ...args, csrf_token: await getCsrfToken() } : args;
+
+    let request;
+    try {
+      request = buildRequest(spec, callArgs);
+    } catch (error) {
+      return text(`Could not build the request for "${spec.name}": ${(error as Error).message}`, true);
+    }
+
     const result = await httpService.send(request, { withAuth: spec.requires_auth !== false });
 
-    if (result.status === 401 || result.status === 403) {
-      // httpService already tried to refresh and replay this request, so
-      // reaching here means the session is really gone.
+    if (result.status === 403) {
       return text(
-        `Carrefour returned ${result.status} for ${spec.name}. The session is expired and could not be ` +
-          `renewed automatically.\n\n${NO_SESSION_MESSAGE}`,
+        `Carrefour returned 403 for ${spec.name}: the Cloudflare challenge or the CSRF check rejected the ` +
+          'request. Try again; if it persists, sign in again with carrefour_browser_login.',
         true
       );
     }
 
     if (!result.ok) {
       return text(
-        `HTTP ${result.status} ${result.statusText} on ${request.method} ${request.url}\n\n${render(result.data)}`,
+        `HTTP ${result.status} ${result.statusText} on ${request.method} ${redactUrl(request.url)}\n\n${render(extract(result.data))}`,
         true
       );
     }
 
-    return text(render(result.data));
+    // SFCC reports business failures in a 200 with an `error` code, e.g. NO_SHIPPING_METHOD_SELECTED.
+    const data = extract(result.data, spec.response);
+    const error = typeof data === 'object' && data !== null ? (data as { error?: unknown }).error : undefined;
+    if (typeof error === 'string' && error) {
+      const hint = spec.response?.hints?.[error];
+      return text(`carrefour.it refused ${spec.name}: ${error}${hint ? `\n\n${hint}` : ''}\n\n${render(data)}`, true);
+    }
+    return text(render(data));
   } catch (error) {
     logger.error('Tool execution failed', { tool: spec.name, error: String(error) });
     return text(`Request failed for "${spec.name}": ${(error as Error).message}`, true);
@@ -69,7 +83,7 @@ export async function executeSpec(spec: ToolSpec, args: Record<string, unknown>)
 
 /**
  * Register every JSON-declared tool on the MCP server.
- * All 43 endpoints are served by this one generic executor.
+ * Every carrefour.it endpoint is served by this one generic executor.
  */
 export function registerSpecTools(server: McpServer, load: LoadResult = loadToolSpecs()): LoadResult {
   for (const spec of load.specs) {
