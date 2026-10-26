@@ -30,17 +30,38 @@ async function run(work: () => Promise<string>) {
 export interface ShoppingList {
   list_id: string;
   name: string;
+  count?: number;
 }
 
-/** The lists linked from /account/wishlist: `/wishlist?…id=<list id>…`. */
+/** The last heading or title-like element in `html`: a list card's title, "nuova lista MPC (1)". */
+function lastTitle(html: string): string | undefined {
+  const titles = [
+    ...html.matchAll(/<(h[1-6]|p|span|div)\b[^>]*?(?:class="[^"]*(?:title|name)[^"]*")?[^>]*>([^<]{1,120})<\/\1>/g),
+  ]
+    .filter((m) => m[1].startsWith('h') || /class="[^"]*(?:title|name)/.test(m[0]))
+    .map((m) => textOf(m[2]))
+    .filter(Boolean);
+  return titles.at(-1);
+}
+
+/**
+ * The lists linked from /account/wishlist: `/wishlist?…id=<list id>…`. Each card's
+ * link reads "Vedi la lista", so the name is the card title before the link.
+ */
 export function parseShoppingLists(html: string): ShoppingList[] {
-  const lists = new Map<string, string>();
+  const lists = new Map<string, ShoppingList>();
+  let previousEnd = 0;
   for (const m of html.matchAll(/<a\b[^>]*href="([^"]*\/wishlist\?[^"]*)"[^>]*>([\s\S]*?)<\/a>/g)) {
     const id = decodeEntities(m[1]).match(/[?&]id=([0-9a-zA-Z]+)/)?.[1];
-    const name = textOf(m[2]);
-    if (id && !lists.get(id)) lists.set(id, name);
+    const linkText = textOf(m[2]);
+    const generic = !linkText || /^vedi\b/i.test(linkText);
+    const label = (generic ? lastTitle(html.slice(previousEnd, m.index)) : linkText) ?? linkText;
+    previousEnd = m.index! + m[0].length;
+    if (!id || lists.has(id)) continue;
+    const counted = label.match(/^(.*?)\s*\((\d+)\)$/);
+    lists.set(id, counted ? { list_id: id, name: counted[1], count: Number(counted[2]) } : { list_id: id, name: label });
   }
-  return [...lists].map(([list_id, name]) => ({ list_id, name }));
+  return [...lists.values()];
 }
 
 /** The products on a /wishlist?id=… page: product tiles, or any element carrying data-pid. */
@@ -62,7 +83,7 @@ export function parseShoppingListProducts(html: string): Product[] {
 
 async function readList(listId: string): Promise<Product[]> {
   return parseShoppingListProducts(
-    await sfccHtml('GET', `${CARREFOUR_ORIGIN}/wishlist`, { query: { rurl: '8', id: listId } })
+    await sfccHtml('GET', `${CARREFOUR_ORIGIN}/wishlist`, { query: { rurl: '8', id: listId }, page: true })
   );
 }
 
@@ -90,7 +111,7 @@ export function registerListTools(server: McpServer): void {
     () =>
       run(async () => {
         await requireSignedIn();
-        const lists = parseShoppingLists(await sfccHtml('GET', `${CARREFOUR_ORIGIN}/account/wishlist`, { query: { rurl: '8' } }));
+        const lists = parseShoppingLists(await sfccHtml('GET', `${CARREFOUR_ORIGIN}/account/wishlist`, { query: { rurl: '8' }, page: true }));
         if (lists.length === 0) return 'No shopping list found. Create one with create_shopping_list.';
         return JSON.stringify(lists, null, 2);
       })

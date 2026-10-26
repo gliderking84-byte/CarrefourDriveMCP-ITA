@@ -98,9 +98,32 @@ const form = (req: FetchRequest) => Object.fromEntries(req.formEntries ?? []);
 
 test('parseShoppingLists keeps one entry per list, named by its first link', () => {
   assert.deepEqual(parseShoppingLists(LISTS_PAGE), [
-    { list_id: 'aaa111', name: 'Preferiti (2)' },
+    { list_id: 'aaa111', name: 'Preferiti', count: 2 },
     { list_id: 'bbb222', name: 'Spesa settimanale' },
   ]);
+});
+
+test('parseShoppingLists names "Vedi la lista" cards by their title', () => {
+  const cards = `
+    <div class="card"><p class="list-title">La mia lista spesa online (3)</p>
+      <p>Ritrova i tuoi prodotti preferiti e aggiungili al carrello</p>
+      <a href="/wishlist?rurl=8&amp;id=ab72">Vedi la lista</a></div>
+    <div class="card"><h3>Lista Spesa (0)</h3><button>⋮</button>
+      <a href="/wishlist?rurl=8&amp;id=3d04">Vedi la lista</a></div>
+    <div class="card"><h3>nuova lista MPC (1)</h3>
+      <a href="/wishlist?rurl=8&amp;id=f321">Vedi la lista</a></div>`;
+  assert.deepEqual(parseShoppingLists(cards), [
+    { list_id: 'ab72', name: 'La mia lista spesa online', count: 3 },
+    { list_id: '3d04', name: 'Lista Spesa', count: 0 },
+    { list_id: 'f321', name: 'nuova lista MPC', count: 1 },
+  ]);
+});
+
+test('redactTokens hides the CSRF tokens a page embeds', async () => {
+  const { redactTokens } = await import('../services/sfcc.service.js');
+  const page = '<input name="csrf_token" type="hidden" value="SECRET1"/><input value="SECRET2" name="csrf_token">' +
+    '<div data-option-token-value="SECRET3"></div><a href="/x?csrf_token=SECRET4&a=1">';
+  assert.equal(/SECRET/.test(redactTokens(page)), false);
 });
 
 test('parseShoppingListProducts reads tiles, or any element carrying data-pid', () => {
