@@ -20,7 +20,7 @@ const WINDOW_OPEN_MESSAGE =
 function loginStateLine(): string {
   const state = loginState();
   if (state.inProgress) {
-    return `\nLogin window: open since ${state.startedAt!.toLocaleTimeString()}, waiting for you to sign in.`;
+    return `\nLogin window (${state.browser}): open since ${state.startedAt!.toLocaleTimeString()}, waiting for you to sign in.`;
   }
   return state.lastResult ? `\nLast login: ${state.lastResult}` : '';
 }
@@ -132,7 +132,8 @@ export function registerSessionTools(server: McpServer): void {
         try {
           const result = await Promise.race([login.done, timeout, cancelled]);
           if (result !== null) return text(result, result.startsWith('Browser login failed'));
-          return text(login.alreadyRunning ? `Still waiting. ${WINDOW_OPEN_MESSAGE}` : WINDOW_OPEN_MESSAGE);
+          const opened = `${WINDOW_OPEN_MESSAGE} (Browser: ${login.browser}.)`;
+          return text(login.alreadyRunning ? `Still waiting. ${opened}` : opened);
         } finally {
           clearInterval(ticker);
           clearTimeout(timer);

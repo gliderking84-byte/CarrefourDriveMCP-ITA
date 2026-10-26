@@ -1,15 +1,75 @@
 import { createRequire } from 'module';
 import { spawn } from 'child_process';
 import { createServer } from 'net';
-import { mkdtempSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
+import { join, win32 } from 'path';
 import { sessionService, CARREFOUR_ORIGIN } from './session.service.js';
 import { browserService } from './browser.service.js';
 import { forgetLoginState, isLoggedIn } from './auth.service.js';
 import { logger } from '../utils/logger.js';
+import { dataPath } from '../utils/paths.js';
 
 const require = createRequire(import.meta.url);
+
+export interface LoginBrowser {
+  path: string;
+  label: string;
+}
+
+/**
+ * Where to look for a real, user-installed browser, by platform. Cloudflare
+ * Turnstile is slow and keeps expiring in Playwright's "Chrome for Testing",
+ * while it validates normally in a stock Chrome or Edge.
+ */
+export function loginBrowserCandidates(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env
+): LoginBrowser[] {
+  if (platform === 'win32') {
+    const roots = [env.PROGRAMFILES, env['PROGRAMFILES(X86)'], env.LOCALAPPDATA].filter((r): r is string => !!r);
+    const under = (rel: string, label: string) => roots.map((root) => ({ path: win32.join(root, rel), label }));
+    return [
+      ...under('Google\\Chrome\\Application\\chrome.exe', 'Google Chrome'),
+      ...under('Microsoft\\Edge\\Application\\msedge.exe', 'Microsoft Edge'),
+      ...under('BraveSoftware\\Brave-Browser\\Application\\brave.exe', 'Brave'),
+    ];
+  }
+  if (platform === 'darwin') {
+    return [
+      { path: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', label: 'Google Chrome' },
+      { path: '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge', label: 'Microsoft Edge' },
+      { path: '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser', label: 'Brave' },
+      { path: '/Applications/Chromium.app/Contents/MacOS/Chromium', label: 'Chromium' },
+    ];
+  }
+  return [
+    { path: '/usr/bin/google-chrome', label: 'Google Chrome' },
+    { path: '/usr/bin/google-chrome-stable', label: 'Google Chrome' },
+    { path: '/usr/bin/microsoft-edge', label: 'Microsoft Edge' },
+    { path: '/usr/bin/brave-browser', label: 'Brave' },
+    { path: '/usr/bin/chromium', label: 'Chromium' },
+    { path: '/usr/bin/chromium-browser', label: 'Chromium' },
+    { path: '/snap/bin/chromium', label: 'Chromium' },
+  ];
+}
+
+/**
+ * The browser the login window runs in: CARREFOUR_LOGIN_BROWSER if set, else
+ * the first installed Chrome-family browser, else Playwright's Chromium.
+ */
+export function findLoginBrowser(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync
+): LoginBrowser | null {
+  if (env.CARREFOUR_LOGIN_BROWSER) return { path: env.CARREFOUR_LOGIN_BROWSER, label: 'CARREFOUR_LOGIN_BROWSER' };
+  return loginBrowserCandidates(platform, env).find((b) => exists(b.path)) ?? null;
+}
+
+function playwrightChromium(): LoginBrowser {
+  const { chromium } = require('playwright') as typeof import('playwright');
+  return { path: chromium.executablePath(), label: 'Chrome for Testing (Playwright)' };
+}
 
 export function isPlaywrightAvailable(): boolean {
   try {
@@ -30,6 +90,7 @@ const POLL_MS = 2000;
 
 export interface BrowserLoginOptions {
   waitMs?: number;
+  browser?: LoginBrowser;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -79,8 +140,9 @@ function loggedIn(tabs: Array<{ type: string; url: string }>): boolean {
  * Two constraints shape this:
  *
  *  - Cloudflare Turnstile refuses to validate in a CDP-driven browser, so the
- *    window cannot be a Playwright one. It is a plain Chromium process, with a
- *    debugging port opened but nothing attached to it until the login is done.
+ *    window cannot be a Playwright one. It is a plain browser process — the
+ *    user's own Chrome or Edge when installed — with a debugging port opened
+ *    but nothing attached to it until the login is done.
  *  - the SFCC session cookies are *session* cookies, and Chromium never writes
  *    those to disk. Waiting for the window to close would therefore destroy
  *    exactly what we came for, and the on-disk cookies are encrypted with a key
@@ -99,11 +161,16 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
   }
 
   const { chromium } = await import('playwright');
-  const executable = chromium.executablePath();
+  const browser = opts.browser ?? findLoginBrowser() ?? playwrightChromium();
+  const executable = browser.path;
   const port = await freePort();
-  // A throwaway profile: the server's own profile stays untouched and unlocked.
-  const dir = mkdtempSync(join(tmpdir(), 'carrefour-login-'));
+  // A dedicated profile, kept between logins: Cloudflare is far quicker with a
+  // browser it has seen before than with a blank one. Never the user's own
+  // profile (Chrome refuses remote debugging on it), never the server's.
+  const dir = dataPath('login-profile');
+  mkdirSync(dir, { recursive: true });
   const waitMs = opts.waitMs ?? 900_000;
+  logger.info('Opening the login window', { browser: browser.label, executable });
 
   const child = spawn(
     executable,
@@ -170,7 +237,6 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
     } catch {
       child.kill('SIGTERM');
     }
-    rmSync(dir, { recursive: true, force: true });
   }
 
   // Hand the fresh cookies to the server's browser, and prove they work.
@@ -197,11 +263,12 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
 export interface LoginState {
   inProgress: boolean;
   startedAt?: Date;
+  browser?: string;
   /** Outcome of the last login attempt, once it finished. */
   lastResult?: string;
 }
 
-let current: { startedAt: Date; done: Promise<string> } | null = null;
+let current: { startedAt: Date; browser: string; done: Promise<string> } | null = null;
 let lastResult: string | undefined;
 
 /**
@@ -214,12 +281,19 @@ let lastResult: string | undefined;
 export function startBrowserLogin(opts: BrowserLoginOptions = {}): {
   alreadyRunning: boolean;
   startedAt: Date;
+  browser: string;
   done: Promise<string>;
 } {
   if (current) return { alreadyRunning: true, ...current };
 
   const startedAt = new Date();
-  const done = browserLogin(opts)
+  let browser: LoginBrowser | undefined = opts.browser;
+  try {
+    browser ??= findLoginBrowser() ?? playwrightChromium();
+  } catch {
+    // Playwright missing: browserLogin reports it.
+  }
+  const done = browserLogin({ ...opts, browser })
     .catch((error: unknown) => `Browser login failed: ${(error as Error).message}`)
     .then((result) => {
       lastResult = result;
@@ -227,10 +301,12 @@ export function startBrowserLogin(opts: BrowserLoginOptions = {}): {
       logger.info('Browser login finished', { result });
       return result;
     });
-  current = { startedAt, done };
-  return { alreadyRunning: false, startedAt, done };
+  current = { startedAt, browser: browser?.label ?? 'unknown', done };
+  return { alreadyRunning: false, ...current };
 }
 
 export function loginState(): LoginState {
-  return current ? { inProgress: true, startedAt: current.startedAt, lastResult } : { inProgress: false, lastResult };
+  return current
+    ? { inProgress: true, startedAt: current.startedAt, browser: current.browser, lastResult }
+    : { inProgress: false, lastResult };
 }

@@ -113,7 +113,11 @@ signing in is interactive:
 
 1. Ask your agent to run **`carrefour_browser_login`**.
 2. A browser window opens on the private-customer login page
-   (`carrefour.it/login?type=b2c`). Sign in yourself.
+   (`carrefour.it/login?type=b2c`). Sign in yourself. The window is your own
+   **Chrome** (or Edge, Brave, Chromium — the first one installed), on a
+   dedicated profile kept in `<data>/login-profile`: Cloudflare's captcha is slow
+   and keeps expiring in Playwright's "Chrome for Testing", which is only the
+   fallback. Point `CARREFOUR_LOGIN_BROWSER` at another executable to choose.
 3. **Don't close the window** — the server notices it left the login page, reads
    the session cookies from memory, checks that carrefour.it sees you as signed
    in, and closes it.
@@ -269,6 +273,7 @@ See `.env.example`. Main variables:
 | `CARREFOUR_BROWSER_PROFILE` | `<data>/browser-profile` | persistent Chromium profile |
 | `CARREFOUR_KEEPALIVE_MINUTES` | `20` | session keep-alive period; `0` disables |
 | `CARREFOUR_LOGIN_WAIT_MS` | `45000` | how long `carrefour_browser_login` waits before returning |
+| `CARREFOUR_LOGIN_BROWSER` | first installed Chrome / Edge / Brave / Chromium | browser executable for the login window |
 | `CARREFOUR_NAV_TIMEOUT_MS` | `60000` | browser navigation timeout |
 | `CARREFOUR_USER_AGENT` | stock Chrome UA | UA of the transport browser |
 | `CARREFOUR_TOOLS_DIR` | `<project>/tools` | JSON tool definitions directory |
