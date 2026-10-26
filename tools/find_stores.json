@@ -1,0 +1,67 @@
+{
+  "name": "find_stores",
+  "description": "Finds the Carrefour services available for an Italian address or CAP: home delivery ('delivery'), click & collect in store ('pickup_in_store') and drive ('drive'), each with its stores (ID, name, address, distance). Use the store ID and shipping_method_id with get_delivery_timeslots and reserve_delivery_timeslot.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "cap": {
+        "type": "string",
+        "description": "Italian postal code (CAP), e.g. '20121'."
+      },
+      "city": {
+        "type": "string",
+        "description": "Municipality, e.g. 'Milano'."
+      },
+      "state": {
+        "type": "string",
+        "description": "Province code, e.g. 'MI'."
+      },
+      "lat": {
+        "type": "string",
+        "description": "Latitude of the address, e.g. '45.4642'. The site always sends it; results may be poorer without it."
+      },
+      "long": {
+        "type": "string",
+        "description": "Longitude of the address, e.g. '9.1900'."
+      }
+    },
+    "required": [
+      "cap",
+      "city"
+    ]
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT/Store-Search",
+    "headers": {
+      "accept": "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest"
+    },
+    "query": {
+      "cap": {
+        "$param": "cap"
+      },
+      "city": {
+        "$param": "city"
+      },
+      "state": {
+        "$param": "state"
+      },
+      "lat": {
+        "$param": "lat"
+      },
+      "long": {
+        "$param": "long"
+      },
+      "administrativeAreaLevel3": {
+        "$param": "city"
+      },
+      "isGeneric": "1",
+      "timeslotEnabled": "true"
+    }
+  },
+  "requires_auth": false,
+  "response": {
+    "extract": "stores"
+  }
+}

@@ -1,173 +1,93 @@
-import { CARREFOUR_ORIGIN, IAM_ORIGIN, SessionService, sessionService } from './session.service.js';
+import { SFCC_BASE, SessionService, sessionService } from './session.service.js';
 import { browserService } from './browser.service.js';
 import { logger } from '../utils/logger.js';
 
 /**
- * Carrefour authentication, as observed on the live site.
+ * Carrefour Italia authentication, as observed on the live site.
  *
- * Logging in goes through ForgeRock AM (`moncompte.carrefour.fr/iam`) and ends
- * with two independent sessions:
+ * carrefour.it is a Salesforce Commerce Cloud storefront: the whole session —
+ * guest or signed in — lives in the SFCC session cookies on `www.carrefour.it`.
+ * There is no separate identity provider and no refresh token. Signing in posts
+ * to `Account-Login` with a Cloudflare Turnstile token, which only a human in a
+ * real browser can produce, so the login itself is never scripted.
  *
- *   1. the IAM SSO session, carried by the `c4iamsecuretk` cookie on
- *      `moncompte.carrefour.fr` — max 24 h, and killed after 60 min idle;
- *   2. the storefront session, carried by httpOnly cookies on
- *      `www.carrefour.fr`, which the BFF mints from an OAuth2 authorization
- *      code.
- *
- * Only step 1 needs a human: it is gated by a Cloudflare Turnstile captcha and
- * an email OTP. Step 2 is a plain redirect chain, so as long as the SSO cookie
- * is alive the storefront session can be rebuilt headlessly — that is what
- * `refreshSession()` does, and it is our equivalent of a refresh token.
+ * What the server can do on its own:
+ *   - fetch the CSRF token SFCC requires on every state-changing call;
+ *   - tell a signed-in session from a guest one;
+ *   - keep the session from idling out while the server runs.
  */
 
-const CLIENT_ID = process.env.CARREFOUR_OAUTH_CLIENT_ID || 'carrefour_onecarrefour_web';
-const REDIRECT_URI = process.env.CARREFOUR_OAUTH_REDIRECT_URI || `${CARREFOUR_ORIGIN}/login/check`;
-const SCOPE = process.env.CARREFOUR_OAUTH_SCOPE || 'openid iam';
-export function authorizeUrl(): string {
-  const params = new URLSearchParams({
-    client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
-    response_type: 'code',
-    scope: SCOPE,
-  });
-  return `${IAM_ORIGIN}/iam/oauth2/CarrefourConnect/authorize?${params.toString()}`;
-}
+const CSRF_URL = `${SFCC_BASE}/CSRF-Generate`;
+/** Cheap JSON endpoint whose markup says whether the customer is signed in. */
+const LOGIN_PROBE_URL = `${SFCC_BASE}/Store-SelectionBar?pagetype=home&timeslotEnabled=true`;
+/** Lightest authenticated read, used to keep the session alive. */
+const KEEPALIVE_URL = `${SFCC_BASE}/Store-ShowTimeslotReserved`;
 
-export type RefreshFailure = 'no-sso' | 'sso-expired' | 'network';
+const XHR_HEADERS = {
+  accept: 'application/json, text/plain, */*',
+  'x-requested-with': 'XMLHttpRequest',
+};
 
-export interface RefreshResult {
-  ok: boolean;
-  reason?: RefreshFailure;
-  message: string;
-}
-
-/**
- * Landing back on the storefront means the whole chain went through:
- * authorize -> /login/check?code=... -> www. Being left on the IAM host means
- * ForgeRock asked for credentials instead, i.e. the SSO session is gone.
- */
-function landedOnStorefront(finalUrl: string): boolean {
+/** Ask SFCC for a fresh CSRF token. Tokens are tied to the session, so one is fetched per write. */
+export async function getCsrfToken(): Promise<string> {
+  const response = await browserService.fetch({ method: 'POST', url: CSRF_URL, headers: XHR_HEADERS });
+  if (!response.ok) throw new Error(`CSRF-Generate answered HTTP ${response.status}`);
+  let token: unknown;
   try {
-    return new URL(finalUrl).origin === CARREFOUR_ORIGIN;
+    token = (JSON.parse(response.text) as { csrf?: { token?: unknown } }).csrf?.token;
   } catch {
-    return false;
+    token = undefined;
   }
+  if (typeof token !== 'string' || !token) throw new Error('CSRF-Generate returned no token');
+  return token;
 }
 
-async function doRefresh(session: SessionService): Promise<RefreshResult> {
-  if (!session.hasSso()) {
-    return {
-      ok: false,
-      reason: 'no-sso',
-      message:
-        'No IAM SSO cookie (c4iamsecuretk) in the browser profile, so the storefront session ' +
-        'cannot be rebuilt. Run carrefour_browser_login to sign in again.',
-    };
-  }
-
-  let landing: { status: number | null; finalUrl: string };
-  try {
-    // Chromium walks the redirect chain and stores the cookies itself.
-    landing = await browserService.navigate(authorizeUrl());
-  } catch (error) {
-    logger.error('Session refresh failed', { error: String(error) });
-    return { ok: false, reason: 'network', message: `Session refresh failed: ${(error as Error).message}` };
-  }
-
-  if (!landedOnStorefront(landing.finalUrl)) {
-    logger.error('Session refresh stopped short of the storefront', { finalUrl: landing.finalUrl });
-    return {
-      ok: false,
-      reason: 'sso-expired',
-      message:
-        'The IAM SSO session is no longer valid (it expires after 60 min idle, 24 h max), so no ' +
-        'authorization code was issued. Sign in again with carrefour_browser_login — Carrefour ' +
-        'requires a captcha and an email OTP, which cannot be scripted.',
-    };
-  }
-
-  session.persist();
-  logger.info('Session refreshed', { finalUrl: landing.finalUrl, status: landing.status });
-  return { ok: true, message: 'Storefront session refreshed from the IAM SSO cookie.' };
+/** Read the signed-in flag out of a Store-SelectionBar response. `null` when it is not there. */
+export function parseUserLogged(body: string): boolean | null {
+  const match = body.match(/data-option-user-logged=\\?"(true|false)\\?"/);
+  return match ? match[1] === 'true' : null;
 }
 
-let inFlight: Promise<RefreshResult> | null = null;
+const LOGIN_CACHE_MS = 5 * 60_000;
+let loginCache: { at: number; logged: boolean | null } | null = null;
 
 /**
- * Rebuild the storefront session from the SSO cookie. Concurrent callers share
- * one round-trip: a burst of 401s must not trigger a burst of re-authentications.
+ * Whether the browser session belongs to a signed-in customer. SFCC never
+ * answers 401: an expired session silently becomes a guest one, and a write
+ * would land in an anonymous cart. Cached briefly so writes do not double the
+ * request count.
  */
-export function refreshSession(session: SessionService = sessionService): Promise<RefreshResult> {
-  if (!inFlight) {
-    inFlight = doRefresh(session).finally(() => {
-      inFlight = null;
-    });
-  }
-  return inFlight;
+export async function isLoggedIn(opts: { fresh?: boolean } = {}): Promise<boolean | null> {
+  if (!opts.fresh && loginCache && Date.now() - loginCache.at < LOGIN_CACHE_MS) return loginCache.logged;
+  const response = await browserService.fetch({ method: 'GET', url: LOGIN_PROBE_URL, headers: XHR_HEADERS });
+  const logged = response.ok ? parseUserLogged(response.text) : null;
+  loginCache = { at: Date.now(), logged };
+  return logged;
 }
 
-export interface SsoStatus {
-  present: boolean;
-  /** Seconds before the SSO session dies of old age, when the server tells us. */
-  secondsLeft?: number;
-  /** Idle timeout in minutes, after which the SSO session dies early. */
-  maxIdleMinutes?: number;
-  error?: string;
-}
-
-/** Ask ForgeRock how much life is left in the SSO session. */
-export async function ssoStatus(session: SessionService = sessionService): Promise<SsoStatus> {
-  if (!session.hasSso()) return { present: false };
-
-  const call = async (action: string): Promise<Record<string, number> | null> => {
-    const response = await browserService.fetch({
-      method: 'POST',
-      url: `${IAM_ORIGIN}/iam/json/sessions/?_action=${action}`,
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-        'accept-api-version': 'resource=1.1',
-        'x-requested-with': 'XMLHttpRequest',
-      },
-      body: '{}',
-    });
-    if (!response.ok) return null;
-    try {
-      return JSON.parse(response.text) as Record<string, number>;
-    } catch {
-      return null;
-    }
-  };
-
-  try {
-    const [timeLeft, maxIdle] = await Promise.all([call('getTimeLeft'), call('getMaxIdle')]);
-    return {
-      present: true,
-      secondsLeft: timeLeft?.maxtime,
-      maxIdleMinutes: maxIdle?.maxidletime,
-    };
-  } catch (error) {
-    return { present: true, error: (error as Error).message };
-  }
+export function forgetLoginState(): void {
+  loginCache = null;
 }
 
 let keepAliveTimer: NodeJS.Timeout | null = null;
 
 /**
- * The SSO session dies after 60 min of inactivity, which a long-lived MCP
- * server would otherwise hit constantly. Replaying the OAuth chain on a timer
- * touches the SSO session *and* keeps the storefront cookies fresh.
+ * SFCC drops idle sessions after about half an hour, which a long-running MCP
+ * server would otherwise hit between two user requests. A light authenticated
+ * read on a timer keeps it alive — only while the browser is already up, so an
+ * idle server never launches Chromium just for this.
  *
  * Set CARREFOUR_KEEPALIVE_MINUTES=0 to opt out.
  */
 export function startKeepAlive(session: SessionService = sessionService): void {
-  const minutes = parseInt(process.env.CARREFOUR_KEEPALIVE_MINUTES || '30', 10);
+  const minutes = parseInt(process.env.CARREFOUR_KEEPALIVE_MINUTES || '20', 10);
   if (!Number.isFinite(minutes) || minutes <= 0 || keepAliveTimer) return;
 
   keepAliveTimer = setInterval(() => {
-    if (!session.hasSso()) return;
-    refreshSession(session)
-      .then((result) => logger.info('Keep-alive', { ok: result.ok, reason: result.reason }))
+    if (!session.hasSession() || !browserService.isRunning()) return;
+    browserService
+      .fetch({ method: 'GET', url: KEEPALIVE_URL, headers: XHR_HEADERS })
+      .then((response) => logger.info('Keep-alive', { status: response.status }))
       .catch((error) => logger.error('Keep-alive failed', { error: String(error) }));
   }, minutes * 60_000);
 

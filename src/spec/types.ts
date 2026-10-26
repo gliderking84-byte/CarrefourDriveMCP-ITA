@@ -1,7 +1,7 @@
 /**
  * Types describing the declarative tool definitions stored in `tools/*.json`.
  *
- * These files were extracted from real carrefour.fr traffic. They are fully
+ * These files were written from real carrefour.it traffic. They are fully
  * self-describing: parameter schema + HTTP request template with `{"$param": "x"}`
  * placeholders. This project executes them directly — no external runner needed.
  */
@@ -22,6 +22,8 @@ export interface JsonSchemaProperty {
   description?: string;
   items?: JsonSchemaProperty;
   enum?: unknown[];
+  /** Sent when the caller leaves the parameter out. */
+  default?: unknown;
 }
 
 export interface JsonSchemaObject {
@@ -41,13 +43,28 @@ export interface RequestSpec {
   content_type?: string;
 }
 
+/** Names of the response extractors in `extract.ts`. */
+export type ExtractorName = 'json' | 'product_grid' | 'suggestions' | 'cart' | 'stores' | 'timeslots';
+
+export interface ResponseSpec {
+  /** How to turn the raw response into something worth handing to a model. Default: `json`. */
+  extract?: ExtractorName;
+  /** For JSON responses: keep only these top-level keys. */
+  pick?: string[];
+}
+
 export interface ToolSpec {
   name: string;
   description: string;
   parameters?: JsonSchemaObject;
   request: RequestSpec;
   requires_auth?: boolean;
-  example_traces?: string[];
+  /**
+   * The request needs a fresh SFCC CSRF token: the executor fetches one and
+   * exposes it to the templates as `{"$param": "csrf_token"}`.
+   */
+  csrf?: boolean;
+  response?: ResponseSpec;
 }
 
 /** A fully resolved HTTP request, ready to be handed to `fetch`. */

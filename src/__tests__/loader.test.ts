@@ -6,7 +6,7 @@ import { schemaToZodShape } from '../spec/params.js';
 test('every tool definition in tools/ loads without failure', () => {
   const { specs, failures, dir } = loadToolSpecs();
   assert.deepEqual(failures, [], `failures in ${dir}: ${JSON.stringify(failures)}`);
-  assert.equal(specs.length, 36, `expected 36 tools, got ${specs.length}`);
+  assert.equal(specs.length, 11, `expected 11 tools, got ${specs.length}`);
 });
 
 test('tool names are unique and MCP-safe', () => {
@@ -28,6 +28,33 @@ test('validateSpec rejects malformed definitions', () => {
     /invalid url/
   );
   assert.equal(validateSpec({ name: 'a', description: 'd', request: { method: 'GET', url: 'https://x' } }), null);
+  assert.match(
+    validateSpec({
+      name: 'a',
+      description: 'd',
+      request: { method: 'GET', url: 'https://x' },
+      response: { extract: 'nope' },
+    }) ?? '',
+    /unknown response extractor/
+  );
+  assert.match(
+    validateSpec({
+      name: 'a',
+      description: 'd',
+      request: { method: 'GET', url: 'https://x' },
+      parameters: { type: 'object', properties: { csrf_token: { type: 'string' } } },
+    }) ?? '',
+    /reserved/
+  );
+});
+
+test('every tool that writes asks for a CSRF token and a signed-in session', () => {
+  const { specs } = loadToolSpecs();
+  for (const s of specs) {
+    const usesToken = JSON.stringify(s.request).includes('"$param":"csrf_token"');
+    assert.equal(usesToken, s.csrf === true, `${s.name}: csrf flag and csrf_token placeholder disagree`);
+    if (s.csrf) assert.equal(s.requires_auth, true, `${s.name} writes but does not require a session`);
+  }
 });
 
 test('schemaToZodShape marks required vs optional parameters', () => {

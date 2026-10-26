@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SessionService } from '../services/session.service.js';
-import { refreshSession, authorizeUrl } from '../services/auth.service.js';
+import { parseUserLogged } from '../services/auth.service.js';
+import { redactUrl } from '../services/http.service.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'carrefour-auth-test-'));
 
@@ -16,51 +17,31 @@ beforeEach(() => {
 
 after(() => rmSync(dir, { recursive: true, force: true }));
 
-test('refreshSession refuses to run without an SSO cookie', async () => {
-  process.env.CARREFOUR_SESSION_FILE = join(dir, 'nosso.json');
-  const session = new SessionService();
-  session.importCookies('sid=storefront-only');
-
-  // No SSO cookie means no browser is started at all, so this stays offline.
-  const result = await refreshSession(session);
-  assert.equal(result.ok, false);
-  assert.equal(result.reason, 'no-sso');
-  assert.match(result.message, /c4iamsecuretk/);
+test('parseUserLogged reads the flag from the JSON-escaped Store-SelectionBar markup', () => {
+  const body = JSON.stringify({ storeSelectionBar: '<div data-option-timeslot-enabled="true" data-option-user-logged="true">' });
+  assert.equal(parseUserLogged(body), true);
+  assert.equal(parseUserLogged('<div data-option-user-logged="false">'), false);
+  assert.equal(parseUserLogged('{"storeSelectionBar":""}'), null);
 });
 
-test('the SSO cookie is read back from the IAM host, not the storefront', () => {
-  process.env.CARREFOUR_SESSION_FILE = join(dir, 'sso.json');
-  const session = new SessionService();
-
-  session.importCookies('[{"name":"c4iamsecuretk","value":"tok","domain":"www.carrefour.fr","path":"/"}]');
-  assert.equal(session.hasSso(), false, 'a same-named cookie on the storefront must not count');
-
-  session.importCookies('[{"name":"c4iamsecuretk","value":"tok","domain":"moncompte.carrefour.fr","path":"/"}]');
-  assert.equal(session.hasSso(), true);
-  assert.equal(session.getSsoToken(), 'tok');
+test('redactUrl keeps CSRF tokens out of logged URLs', () => {
+  assert.equal(
+    redactUrl('https://www.carrefour.it/cart/updatequantity?pid=1&csrf_token=SECRET%3D&decrease=false'),
+    'https://www.carrefour.it/cart/updatequantity?pid=1&csrf_token=<redacted>&decrease=false'
+  );
+  assert.equal(redactUrl('https://www.carrefour.it/cart'), 'https://www.carrefour.it/cart');
 });
 
-test('the authorize URL carries the OAuth parameters the storefront expects', () => {
-  const url = new URL(authorizeUrl());
-  assert.equal(url.origin, 'https://moncompte.carrefour.fr');
-  assert.equal(url.pathname, '/iam/oauth2/CarrefourConnect/authorize');
-  assert.equal(url.searchParams.get('client_id'), 'carrefour_onecarrefour_web');
-  assert.equal(url.searchParams.get('response_type'), 'code');
-  assert.equal(url.searchParams.get('redirect_uri'), 'https://www.carrefour.fr/login/check');
-});
-
-test('the jar exports cookies in the shape Playwright expects, across both hosts', () => {
+test('the jar exports cookies in the shape Playwright expects', () => {
   process.env.CARREFOUR_SESSION_FILE = join(dir, 'export.json');
   const session = new SessionService();
-  session.importCookies(
-    '[{"name":"sid","value":"a","domain":"www.carrefour.fr","path":"/"},' +
-      '{"name":"c4iamsecuretk","value":"b","domain":"moncompte.carrefour.fr","path":"/"}]'
-  );
+  session.importCookies('[{"name":"dwsid","value":"a","domain":"www.carrefour.it","path":"/"}]');
+  session.importCookies('plain=b');
 
   const exported = session.toPlaywrightCookies();
   const byName = Object.fromEntries(exported.map((c) => [c.name, c]));
-  assert.equal(byName.sid.domain, 'www.carrefour.fr');
-  assert.equal(byName.c4iamsecuretk.domain, 'moncompte.carrefour.fr');
+  assert.equal(byName.dwsid.domain, 'www.carrefour.it');
+  assert.equal(byName.plain.domain, 'www.carrefour.it', 'cookies without a domain default to the storefront');
   for (const cookie of exported) {
     assert.equal(typeof cookie.path, 'string');
     assert.equal(typeof cookie.secure, 'boolean');

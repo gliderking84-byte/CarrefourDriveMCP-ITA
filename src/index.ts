@@ -12,7 +12,7 @@ import { logger } from './utils/logger.js';
 config();
 
 export function createServer(): { server: McpServer; toolCount: number } {
-  const server = new McpServer({ name: 'carrefour-drive', version: '2.0.0' });
+  const server = new McpServer({ name: 'carrefour-it', version: '3.0.0' });
 
   registerSessionTools(server);
   const load = loadToolSpecs();
@@ -20,7 +20,7 @@ export function createServer(): { server: McpServer; toolCount: number } {
 
   if (load.failures.length > 0) {
     for (const f of load.failures) {
-      process.stderr.write(`[carrefour-drive] skipped ${f.file}: ${f.reason}\n`);
+      process.stderr.write(`[carrefour-it] skipped ${f.file}: ${f.reason}\n`);
     }
   }
   logger.info('Tools registered', {
@@ -34,12 +34,12 @@ export function createServer(): { server: McpServer; toolCount: number } {
 
 async function main(): Promise<void> {
   const { server, toolCount } = createServer();
-  // The IAM SSO session dies after 60 min idle, which a long-running server
-  // would otherwise hit between two user requests.
+  // SFCC sessions die after ~30 min idle, which a long-running server would
+  // otherwise hit between two user requests.
   startKeepAlive();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  process.stderr.write(`[carrefour-drive] MCP server ready — ${toolCount} API tools loaded\n`);
+  process.stderr.write(`[carrefour-it] MCP server ready — ${toolCount} API tools loaded\n`);
 
   // The browser is a child process; leaving it behind would lock the profile.
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
@@ -51,6 +51,6 @@ async function main(): Promise<void> {
 
 main().catch((error) => {
   logger.error('Failed to start server', { error: String(error) });
-  process.stderr.write(`[carrefour-drive] fatal: ${String(error)}\n`);
+  process.stderr.write(`[carrefour-it] fatal: ${String(error)}\n`);
   process.exit(1);
 });

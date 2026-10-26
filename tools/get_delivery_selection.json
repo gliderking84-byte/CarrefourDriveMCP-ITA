@@ -1,0 +1,30 @@
+{
+  "name": "get_delivery_selection",
+  "description": "Returns the shipping method, store and CAP currently selected in the session, and the reserved delivery/pickup timeslot if any.",
+  "parameters": {
+    "type": "object",
+    "properties": {},
+    "required": []
+  },
+  "request": {
+    "method": "GET",
+    "url": "https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT/Store-ShowTimeslotReserved",
+    "headers": {
+      "accept": "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest"
+    },
+    "query": {}
+  },
+  "requires_auth": false,
+  "response": {
+    "extract": "json",
+    "pick": [
+      "error",
+      "shippingMethodIdSelected",
+      "storeIdSelected",
+      "shippingSelectedCAP",
+      "timeslotReserved",
+      "firstTimeslot"
+    ]
+  }
+}

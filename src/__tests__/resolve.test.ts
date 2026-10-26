@@ -73,92 +73,76 @@ test('buildQuery skips absent optional params', () => {
 
 // --- Whole-request construction on real tool definitions ---------------------
 
-test('add_item_to_cart: PATCH with a nested JSON body', () => {
-  const req = buildRequest(spec('add_item_to_cart'), {
-    ean: '3560071492007',
-    counter: 2,
-    basketServiceId: '0678-150-7052',
-    subBasketType: 'drive_clcv',
-    pageType: 'search',
-    pageId: 'search',
-  });
+const SFCC = 'https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT';
 
-  assert.equal(req.method, 'PATCH');
-  assert.equal(req.url, 'https://www.carrefour.fr/api/cart');
-  assert.equal(req.headers['content-type'], 'application/json');
-  assert.equal(req.headers['x-requested-with'], 'XMLHttpRequest');
-  assert.deepEqual(JSON.parse(req.body as string), {
-    trackingRequest: { pageType: 'search', pageId: 'search' },
-    items: [
-      {
-        basketServiceId: '0678-150-7052',
-        counter: 2,
-        ean: '3560071492007',
-        subBasketType: 'drive_clcv',
-      },
-    ],
-  });
-});
-
-test('add_item_to_cart_by_ean: optional tracking fields vanish when not supplied', () => {
-  const req = buildRequest(spec('add_item_to_cart_by_ean'), {
-    ean: '123',
-    basketServiceId: 'bs',
-    subBasketType: 'drive_clcv',
-  });
-  assert.deepEqual(JSON.parse(req.body as string), {
-    ean: '123',
-    basketServiceId: 'bs',
-    subBasketType: 'drive_clcv',
-    trackingRequest: {},
-  });
-});
-
-test('get_delivery_timeslots: GET with query and no body', () => {
-  const req = buildRequest(spec('get_delivery_timeslots'), { facilityServiceId: '0678-150-149' });
+test('browse_category: GET with query, optional params left out, no body', () => {
+  const req = buildRequest(spec('browse_category'), { cgid: 'latte', start: 25 });
   assert.equal(req.method, 'GET');
-  assert.equal(req.url, 'https://www.carrefour.fr/api/timeslots?facilityServiceId=0678-150-149');
+  assert.equal(req.url, `${SFCC}/Search-UpdateGrid?cgid=latte&start=25`);
   assert.equal(req.body, undefined);
+  assert.equal(req.headers['x-requested-with'], 'XMLHttpRequest');
   assert.equal(req.headers['content-type'], undefined);
 });
 
-test('validate_checkout_slot: URL segment substitution plus JSON body', () => {
-  const req = buildRequest(spec('validate_checkout_slot'), {
-    basket_service_type: 'driveclcv',
-    deviceFingerPrintId: 'fp-123',
-  });
+test('find_stores: one argument fills two query keys, fixed values are always sent', () => {
+  const req = buildRequest(spec('find_stores'), { cap: '20121', city: 'Milano', state: 'MI' });
+  const url = new URL(req.url);
+  assert.equal(url.pathname, '/on/demandware.store/Sites-carrefour-IT-Site/it_IT/Store-Search');
+  assert.equal(url.searchParams.get('cap'), '20121');
+  assert.equal(url.searchParams.get('administrativeAreaLevel3'), 'Milano');
+  assert.equal(url.searchParams.get('isGeneric'), '1');
+  assert.equal(url.searchParams.get('timeslotEnabled'), 'true');
+  assert.equal(url.searchParams.has('lat'), false);
+});
+
+test('add_to_cart: multipart form with the injected CSRF token and a default quantity', () => {
+  const req = buildRequest(spec('add_to_cart'), { ean: '8002580010945', csrf_token: 'tok' });
   assert.equal(req.method, 'POST');
-  assert.equal(req.url, 'https://www.carrefour.fr/api/checkout/driveclcv/validate/slot');
-  assert.deepEqual(JSON.parse(req.body as string), { deviceFingerPrintId: 'fp-123' });
-});
-
-test('get_loyalty_order_receipt_details: several URL segments', () => {
-  const req = buildRequest(spec('get_loyalty_order_receipt_details'), {
-    gln: '3020180204545',
-    date_key: '20260601',
-    receipt_number: '1-211-1907',
-  });
-  assert.equal(
-    req.url,
-    'https://www.carrefour.fr/api/user/secured/loyalty/orders/receipt/3020180204545/20260601/1-211-1907'
-  );
-});
-
-test('get_account_kpis: array parameter becomes repeated query keys', () => {
-  const req = buildRequest(spec('get_account_kpis'), { codes: ['14', '15', '16'] });
-  assert.equal(
-    req.url,
-    'https://www.carrefour.fr/api/user/my-account/kpis?codes%5B%5D=14&codes%5B%5D=15&codes%5B%5D=16'
-  );
-});
-
-test('create_shopping_list: POST whose payload lives entirely in the query string', () => {
-  const req = buildRequest(spec('create_shopping_list'), { title: 'Ma liste' });
-  assert.equal(req.method, 'POST');
-  assert.equal(req.url, 'https://www.carrefour.fr/api/shopping-lists/memo-list?title=Ma+liste');
-  assert.equal(req.body, undefined);
-  // No payload -> the declared content-type header must not be sent.
+  assert.equal(req.url, 'https://www.carrefour.it/cart/add-product');
+  assert.ok(req.body instanceof FormData);
+  const form = req.body as FormData;
+  assert.equal(form.get('pid'), '8002580010945');
+  assert.equal(form.get('csrf_token'), 'tok');
+  assert.equal(form.get('quantity'), '1');
+  assert.equal(form.get('options'), '[]');
   assert.equal(req.headers['content-type'], undefined);
+});
+
+test('add_to_cart: an explicit quantity wins over the default', () => {
+  const form = buildRequest(spec('add_to_cart'), { ean: '1', quantity: 3, csrf_token: 'tok' }).body as FormData;
+  assert.equal(form.get('quantity'), '3');
+});
+
+test('update_cart_item_quantity: GET carrying the CSRF token and a boolean', () => {
+  const req = buildRequest(spec('update_cart_item_quantity'), { ean: '123', decrease: true, csrf_token: 'tok' });
+  const url = new URL(req.url);
+  assert.equal(req.method, 'GET');
+  assert.equal(url.pathname, '/cart/updatequantity');
+  assert.equal(url.searchParams.get('pid'), '123');
+  assert.equal(url.searchParams.get('decrease'), 'true');
+  assert.equal(url.searchParams.get('fromCart'), 'true');
+  assert.equal(url.searchParams.get('csrf_token'), 'tok');
+});
+
+test('reserve_delivery_timeslot: optional address fields vanish, fixed fields stay', () => {
+  const req = buildRequest(spec('reserve_delivery_timeslot'), {
+    shippingMethodId: 'delivery',
+    timeslotId: 'slot-1',
+    timeslotStart: '2026-10-29T17:00:00.000',
+    timeslotEnd: '2026-10-29T21:00:00.000',
+    timeslotEco: true,
+    storeId: '1234',
+    cap: '20121',
+    city: 'Milano',
+    csrf_token: 'tok',
+  });
+  const form = req.body as FormData;
+  assert.equal(form.get('timeslotEco'), 'true');
+  assert.equal(form.get('reorder'), 'false');
+  assert.equal(form.get('cartPayload'), 'null');
+  assert.equal(form.get('hashText'), '');
+  assert.equal(form.has('streetNumber'), false);
+  assert.equal(form.get('csrf_token'), 'tok');
 });
 
 test('multipart body and URL segment', () => {
@@ -167,7 +151,7 @@ test('multipart body and URL segment', () => {
     description: 'multipart/form-data request with a path parameter',
     request: {
       method: 'POST',
-      url: 'https://www.carrefour.fr/api/information-insert/stores/{store_id}',
+      url: 'https://example.test/stores/{store_id}',
       headers: {},
       query: {},
       body: { insertIds: { $param: 'insert_ids' } },
@@ -178,7 +162,7 @@ test('multipart body and URL segment', () => {
     store_id: '0678',
     insert_ids: ['checkout_top', 'checkout_summary'],
   });
-  assert.equal(req.url, 'https://www.carrefour.fr/api/information-insert/stores/0678');
+  assert.equal(req.url, 'https://example.test/stores/0678');
   assert.ok(req.body instanceof FormData);
   assert.deepEqual((req.body as FormData).getAll('insertIds'), ['checkout_top', 'checkout_summary']);
   // fetch must generate the multipart boundary itself.
@@ -186,5 +170,10 @@ test('multipart body and URL segment', () => {
 });
 
 test('missing required path parameter surfaces a clear error', () => {
-  assert.throws(() => buildRequest(spec('get_shopping_list'), {}), /Missing required URL path parameter/);
+  const withSegment: ToolSpec = {
+    name: 'segment_fixture',
+    description: 'GET with a path parameter',
+    request: { method: 'GET', url: 'https://example.test/lists/{list_id}' },
+  };
+  assert.throws(() => buildRequest(withSegment, {}), /Missing required URL path parameter/);
 });

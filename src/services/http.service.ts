@@ -1,13 +1,16 @@
 import type { BuiltRequest } from '../spec/types.js';
-import { sessionService } from './session.service.js';
 import { browserService, type FetchRequest } from './browser.service.js';
-import { refreshSession } from './auth.service.js';
 import { logger } from '../utils/logger.js';
 
 const RATE_LIMIT_REQUESTS = parseInt(process.env.RATE_LIMIT_REQUESTS || '10', 10);
 const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10);
 const MIN_DELAY_MS = parseInt(process.env.MIN_DELAY_MS || '100', 10);
 const MAX_DELAY_MS = parseInt(process.env.MAX_DELAY_MS || '500', 10);
+
+/** CSRF tokens travel in the query string of some calls; keep them out of the logs. */
+export function redactUrl(url: string): string {
+  return url.replace(/([?&]csrf_token=)[^&]*/g, '$1<redacted>');
+}
 
 export interface HttpResult {
   status: number;
@@ -48,38 +51,12 @@ class HttpService {
   }
 
   /**
-   * Send a request, renewing the session when Carrefour rejects it.
-   *
-   * Storefront cookies expire well before the IAM SSO cookie does, so a 401/403
-   * is usually not a dead end: rebuilding the session from the SSO cookie and
-   * replaying the request once is enough. Only one retry — if the fresh session
-   * is rejected too, the caller deserves the real error.
+   * Send a request through the browser. There is nothing to renew on
+   * carrefour.it — an expired SFCC session quietly turns into a guest one — so
+   * this is a single attempt; callers that care check the login state first.
    */
   async send(request: BuiltRequest, opts: { withAuth: boolean } = { withAuth: true }): Promise<HttpResult> {
-    if (!opts.withAuth) return this.execute(request, false);
-
-    // Nothing usable for this host yet, but a renewable SSO session: rebuild first
-    // rather than spending a request we know will come back 401.
-    if (!sessionService.getCookieHeader(request.url) && sessionService.hasSso()) {
-      await refreshSession();
-    }
-
-    const first = await this.execute(request, true);
-    if (first.status !== 401 && first.status !== 403) return first;
-    if (!sessionService.hasSso()) return first;
-
-    logger.info('Authenticated request rejected, refreshing the session', {
-      status: first.status,
-      url: request.url,
-    });
-
-    const refreshed = await refreshSession();
-    if (!refreshed.ok) {
-      logger.error('Automatic session refresh failed', { reason: refreshed.reason });
-      return first;
-    }
-
-    return this.execute(request, true);
+    return this.execute(request, opts.withAuth);
   }
 
   private async execute(request: BuiltRequest, withAuth: boolean): Promise<HttpResult> {
@@ -101,7 +78,7 @@ class HttpService {
       call.formEntries = [...request.body.entries()].map(([key, value]) => [key, String(value)]);
     }
 
-    logger.info('HTTP request', { method: request.method, url: request.url, withAuth });
+    logger.info('HTTP request', { method: request.method, url: redactUrl(request.url), withAuth });
 
     const response = await browserService.fetch(call);
 
@@ -114,7 +91,7 @@ class HttpService {
       }
     }
 
-    logger.info('HTTP response', { status: response.status, url: request.url });
+    logger.info('HTTP response', { status: response.status, url: redactUrl(request.url) });
 
     return {
       status: response.status,

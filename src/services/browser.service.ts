@@ -8,15 +8,15 @@ import { dataPath } from '../utils/paths.js';
 /**
  * All Carrefour traffic goes through a real Chromium.
  *
- * carrefour.fr sits behind a Cloudflare managed challenge that fingerprints the
- * client: `fetch` (undici) is answered with `403 cf-mitigated: challenge` from
- * the very first request, and plain `curl` is challenged after a handful — from
- * the same IP where Chrome gets a clean `200`. No amount of header spoofing
- * fixes that, so the only viable transport is a browser, and the requests must
- * be issued *inside a page*: Playwright's own APIRequestContext uses a Node HTTP
- * stack and is challenged just like `fetch`.
+ * Like carrefour.fr, carrefour.it sits behind Cloudflare (`server: cloudflare`,
+ * `/cdn-cgi/rum`), whose managed challenge fingerprints the client: a Node
+ * `fetch` is answered with `403 cf-mitigated: challenge`, while Chrome on the
+ * same IP gets a clean `200`. No amount of header spoofing fixes that, so the
+ * only viable transport is a browser, and the requests must be issued *inside a
+ * page*: Playwright's own APIRequestContext uses a Node HTTP stack and is
+ * challenged just like `fetch`.
  *
- * Measured on 2026-08-19:
+ * Measured on carrefour.fr on 2026-08-19, before the port to carrefour.it:
  *
  *   headless shell                                  -> 403 (UA says HeadlessChrome)
  *   channel 'chromium', headless                    -> 403 (idem)
@@ -35,12 +35,11 @@ const USER_AGENT =
 const NAV_TIMEOUT_MS = parseInt(process.env.CARREFOUR_NAV_TIMEOUT_MS || '60000', 10);
 
 /**
- * Where to park a page per origin. The root of the IAM host answers with
- * ERR_ABORTED, so parking there leaves the page on about:blank and every
- * same-origin fetch fails; its login UI loads cleanly instead.
+ * Where to park a page per origin. The cart page is light, never redirects a
+ * guest away, and is what the storefront's own XHRs are sent from.
  */
 const PARKING_PATH: Record<string, string> = {
-  'https://moncompte.carrefour.fr': '/iam/XUI/',
+  'https://www.carrefour.it': '/cart',
 };
 
 function parkingUrl(origin: string): string {
@@ -95,8 +94,8 @@ class BrowserService {
       channel: 'chromium',
       userAgent: USER_AGENT,
       args: ['--disable-blink-features=AutomationControlled'],
-      locale: 'fr-FR',
-      timezoneId: 'Europe/Paris',
+      locale: 'it-IT',
+      timezoneId: 'Europe/Rome',
       viewport: { width: 1366, height: 900 },
     });
     context.setDefaultNavigationTimeout(NAV_TIMEOUT_MS);
@@ -205,14 +204,6 @@ class BrowserService {
       this.pages.delete(origin);
       return run();
     }
-  }
-
-  /** Drive a real navigation — used for the OAuth redirect chain. */
-  async navigate(url: string): Promise<{ status: number | null; finalUrl: string }> {
-    const page = await this.pageFor(new URL(url).origin);
-    const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
-    await this.syncCookies();
-    return { status: response?.status() ?? null, finalUrl: page.url() };
   }
 
   /** Mirror the browser's cookies back into the jar so status/refresh can read them. */

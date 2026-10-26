@@ -30,23 +30,23 @@ test('parseCookieInput accepts a JSON map', () => {
 });
 
 test('parseCookieInput accepts a browser JSON array export', () => {
-  const parsed = parseCookieInput('[{"name":"a","value":"1","domain":".carrefour.fr","path":"/"}]');
+  const parsed = parseCookieInput('[{"name":"a","value":"1","domain":".carrefour.it","path":"/"}]');
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].name, 'a');
-  assert.equal(parsed[0].domain, '.carrefour.fr');
+  assert.equal(parsed[0].domain, '.carrefour.it');
 });
 
 test('cookies are stored, exposed as a Cookie header, and persisted', () => {
   const s = new SessionService();
   assert.equal(s.hasSession(), false);
 
-  const stored = s.importCookies('sid=abc; pref=fr');
+  const stored = s.importCookies('sid=abc; pref=it');
   assert.equal(stored, 2);
   assert.equal(s.hasSession(), true);
 
-  const header = s.getCookieHeader('https://www.carrefour.fr/api/cart');
+  const header = s.getCookieHeader('https://www.carrefour.it/cart');
   assert.match(header, /sid=abc/);
-  assert.match(header, /pref=fr/);
+  assert.match(header, /pref=it/);
   assert.ok(existsSync(process.env.CARREFOUR_SESSION_FILE!));
 
   // A brand new instance must pick the jar back up from disk.
@@ -74,6 +74,6 @@ test('clear() wipes both memory and the session file', () => {
 test('Set-Cookie responses are folded back into the jar', () => {
   process.env.CARREFOUR_SESSION_FILE = join(dir, 'setcookie.json');
   const s = new SessionService();
-  s.storeSetCookies(['newsid=fromserver; Path=/; Domain=.carrefour.fr'], 'https://www.carrefour.fr/api/cart');
+  s.storeSetCookies(['newsid=fromserver; Path=/; Domain=.carrefour.it'], 'https://www.carrefour.it/cart');
   assert.match(s.getCookieHeader(), /newsid=fromserver/);
 });

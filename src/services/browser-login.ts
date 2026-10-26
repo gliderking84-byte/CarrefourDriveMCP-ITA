@@ -4,8 +4,9 @@ import { createServer } from 'net';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { sessionService, SSO_COOKIE_NAME, CARREFOUR_ORIGIN } from './session.service.js';
+import { sessionService, CARREFOUR_ORIGIN } from './session.service.js';
 import { browserService } from './browser.service.js';
+import { forgetLoginState, isLoggedIn } from './auth.service.js';
 import { logger } from '../utils/logger.js';
 
 const require = createRequire(import.meta.url);
@@ -19,8 +20,8 @@ export function isPlaywrightAvailable(): boolean {
   }
 }
 
-/** Redirects to the ForgeRock login UI, which bounces back through OAuth2. */
-const LOGIN_URL = `${CARREFOUR_ORIGIN}/mon-compte/login`;
+/** The SFCC login page; a successful sign-in redirects away from it (to `/` by default). */
+const LOGIN_URL = `${CARREFOUR_ORIGIN}/login`;
 const POLL_MS = 2000;
 
 export interface BrowserLoginOptions {
@@ -60,8 +61,8 @@ function loggedIn(tabs: Array<{ type: string; url: string }>): boolean {
     if (tab.type !== 'page') return false;
     try {
       const url = new URL(tab.url);
-      // Back on the storefront means the OAuth round-trip completed.
-      return url.origin === CARREFOUR_ORIGIN && !url.pathname.startsWith('/mon-compte/login');
+      // Account-Login answers with a redirect URL; leaving /login means it succeeded.
+      return url.origin === CARREFOUR_ORIGIN && !url.pathname.startsWith('/login');
     } catch {
       return false;
     }
@@ -76,15 +77,15 @@ function loggedIn(tabs: Array<{ type: string; url: string }>): boolean {
  *  - Cloudflare Turnstile refuses to validate in a CDP-driven browser, so the
  *    window cannot be a Playwright one. It is a plain Chromium process, with a
  *    debugging port opened but nothing attached to it until the login is done.
- *  - `c4iamsecuretk` is a *session* cookie, and Chromium never writes those to
- *    disk. Waiting for the window to close would therefore destroy exactly what
- *    we came for, and the on-disk cookies are encrypted with a key that another
- *    Chromium launch may not be able to read anyway.
+ *  - the SFCC session cookies are *session* cookies, and Chromium never writes
+ *    those to disk. Waiting for the window to close would therefore destroy
+ *    exactly what we came for, and the on-disk cookies are encrypted with a key
+ *    that another Chromium launch may not be able to read anyway.
  *
- * So we watch the tab list over plain HTTP, and the moment the OAuth chain lands
- * back on the storefront we attach, lift the cookies out of the live browser and
- * keep them in the jar — which is what seeds the server's own browser profile on
- * every launch.
+ * So we watch the tab list over plain HTTP, and the moment the window leaves the
+ * login page we attach, lift the cookies out of the live browser and keep them
+ * in the jar — which is what seeds the server's own browser profile on every
+ * launch.
  */
 export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<string> {
   if (!isPlaywrightAvailable()) {
@@ -134,7 +135,7 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
 
     if (!signedIn) {
       return (
-        'The login did not complete: the window never came back to the storefront. Run the tool ' +
+        'The login did not complete: the window never left the login page. Run the tool ' +
         'again, and leave the window open once you are signed in — closing it discards the session.'
       );
     }
@@ -144,7 +145,7 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
     try {
       const cookies = (await Promise.all(browser.contexts().map((context) => context.cookies()))).flat();
       sessionService.importCookies(JSON.stringify(cookies));
-      logger.info('Login cookies collected', { count: cookies.length, sso: sessionService.hasSso() });
+      logger.info('Login cookies collected', { count: cookies.length });
     } finally {
       await browser.close().catch(() => undefined);
     }
@@ -157,18 +158,23 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
     rmSync(dir, { recursive: true, force: true });
   }
 
-  if (!sessionService.hasSso()) {
-    return (
-      `Signed in, but no '${SSO_COOKIE_NAME}' cookie came back, so the session will not be able to ` +
-      'renew itself. Authenticated tools will work until it expires, then ask you to sign in again.'
-    );
-  }
-
   // Hand the fresh cookies to the server's browser, and prove they work.
   await browserService.close();
-  await browserService.syncCookies();
+  forgetLoginState();
+  let logged: boolean | null = null;
+  try {
+    logged = await isLoggedIn({ fresh: true });
+  } catch (error) {
+    logger.error('Could not verify the login', { error: String(error) });
+  }
+  if (logged === false) {
+    return (
+      'The window left the login page, but carrefour.it treats the session as a guest. Run the tool ' +
+      'again and wait until the site shows you as signed in before doing anything else.'
+    );
+  }
   return (
-    'Signed in. The IAM SSO cookie is stored, so the session renews itself for up to 24 h and ' +
-    'survives a server restart.'
+    'Signed in. The session is stored and kept alive while the server runs; after a long idle ' +
+    'period carrefour.it expires it and you will have to sign in again.'
   );
 }

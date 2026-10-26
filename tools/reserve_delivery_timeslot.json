@@ -1,0 +1,127 @@
+{
+  "name": "reserve_delivery_timeslot",
+  "description": "Reserves a delivery or pickup timeslot, which also selects the store and shipping method for the cart. The reservation lasts 45 minutes. Take timeslotId, timeslotStart, timeslotEnd and timeslotEco from get_delivery_timeslots.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "shippingMethodId": {
+        "type": "string",
+        "description": "'delivery', 'pickup_in_store' or 'drive'."
+      },
+      "timeslotId": {
+        "type": "string",
+        "description": "timeslot_id from get_delivery_timeslots."
+      },
+      "timeslotStart": {
+        "type": "string",
+        "description": "start from get_delivery_timeslots, unchanged (e.g. '2026-10-29T17:00:00.000')."
+      },
+      "timeslotEnd": {
+        "type": "string",
+        "description": "end from get_delivery_timeslots, unchanged."
+      },
+      "timeslotEco": {
+        "type": "boolean",
+        "description": "eco flag from get_delivery_timeslots."
+      },
+      "storeId": {
+        "type": "string",
+        "description": "Carrefour store ID (e.g. '1234'), as returned by find_stores or get_delivery_selection."
+      },
+      "cap": {
+        "type": "string",
+        "description": "Postal code (CAP)."
+      },
+      "city": {
+        "type": "string",
+        "description": "Municipality."
+      },
+      "state": {
+        "type": "string",
+        "description": "Province code, e.g. 'MI'."
+      },
+      "address": {
+        "type": "string",
+        "description": "Street, for home delivery."
+      },
+      "streetNumber": {
+        "type": "string",
+        "description": "Street number, for home delivery."
+      }
+    },
+    "required": [
+      "shippingMethodId",
+      "timeslotId",
+      "timeslotStart",
+      "timeslotEnd",
+      "timeslotEco",
+      "storeId",
+      "cap",
+      "city"
+    ]
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT/TimeSlotApi-ReserveTimeSlot",
+    "headers": {
+      "accept": "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest"
+    },
+    "query": {},
+    "body": {
+      "shippingMethodId": {
+        "$param": "shippingMethodId"
+      },
+      "timeslotId": {
+        "$param": "timeslotId"
+      },
+      "timeslotStart": {
+        "$param": "timeslotStart"
+      },
+      "timeslotEnd": {
+        "$param": "timeslotEnd"
+      },
+      "timeslotEco": {
+        "$param": "timeslotEco"
+      },
+      "storeId": {
+        "$param": "storeId"
+      },
+      "hashText": "",
+      "cartPayload": "null",
+      "reorder": "false",
+      "redirectParams": "null",
+      "csrf_token": {
+        "$param": "csrf_token"
+      },
+      "city": {
+        "$param": "city"
+      },
+      "cap": {
+        "$param": "cap"
+      },
+      "address": {
+        "$param": "address"
+      },
+      "state": {
+        "$param": "state"
+      },
+      "streetNumber": {
+        "$param": "streetNumber"
+      }
+    },
+    "content_type": "multipart/form-data"
+  },
+  "requires_auth": true,
+  "csrf": true,
+  "response": {
+    "extract": "json",
+    "pick": [
+      "error",
+      "errorMessage",
+      "message",
+      "reservedTimeslot",
+      "logged"
+    ]
+  }
+}
