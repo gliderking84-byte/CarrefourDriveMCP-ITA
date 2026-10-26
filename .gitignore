@@ -4,3 +4,7 @@ data/
 .env
 *.log
 .DS_Store
+
+# HAR captures (contain personal data)
+har/
+*.har
