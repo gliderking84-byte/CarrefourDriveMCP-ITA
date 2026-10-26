@@ -190,9 +190,8 @@ Every endpoint above was observed in real carrefour.it traffic, except one:
 
 | Tool | Status |
 | --- | --- |
-| `carrefour_browser_login`, `carrefour_session_status`, `get_cart`, `get_delivery_timeslots`, `reserve_delivery_timeslot`, `add_to_cart` | **tested end to end** through the MCP server on a real account |
+| `carrefour_browser_login`, `carrefour_session_status`, `get_cart`, `get_delivery_timeslots`, `reserve_delivery_timeslot`, `add_to_cart`, `update_cart_item_quantity` (`decrease: true`) | **tested end to end** through the MCP server on a real account |
 | `browse_category`, `search_suggestions`, `get_product`, `find_stores`, `get_delivery_selection`, `update_cart_item_quantity` (increase) | request and response captured, parsers tested against the real responses |
-| `update_cart_item_quantity` with `decrease: true` | same endpoint; `decrease=true` is what the site's own "−" button sends, but no capture of it yet |
 | `search_products` | **not captured.** The site's "most searched" links point to `FactFinder-Search?q=…`; whether it returns a parsable grid and honours `start`/`sz` is still to be confirmed |
 
 ## How authentication works
