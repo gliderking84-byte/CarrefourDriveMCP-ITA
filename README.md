@@ -211,9 +211,10 @@ through the MCP server on a real carrefour.it account (MCP Inspector, October
 2026), and every endpoint was first observed in real browser traffic. The
 response parsers are unit-tested on trimmed copies of those responses.
 
-The 4 checkout tools follow a captured real order call for call, and the whole
-chain is unit-tested against those answers, but they have **not yet been run
-end to end** against the live site.
+The 4 checkout tools follow a captured real order call for call, the whole
+chain is unit-tested against those answers, and `prepare_checkout` and
+`place_order` were then run end to end on the live site, up to the payment page
+opening in the user's browser.
 
 ## How authentication works
 
