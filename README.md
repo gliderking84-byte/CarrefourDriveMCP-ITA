@@ -167,7 +167,9 @@ unit_price, size, category_path, tags, quantity_in_cart, url}`; grids add
 
 Shipping methods: `delivery` (Consegna a casa), `pickup_in_store` (Ritiro in
 negozio), `drive` (Ritiro al Drive). A reservation lasts 45 minutes and also
-selects the store the cart is priced for.
+selects the store the cart is priced for. **Reserve a slot before adding to the
+cart**: in a session with no delivery method chosen — a fresh login window has
+none — `add_to_cart` is refused with `NO_SHIPPING_METHOD_SELECTED`.
 
 ### Cart
 
@@ -188,7 +190,8 @@ Every endpoint above was observed in real carrefour.it traffic, except one:
 
 | Tool | Status |
 | --- | --- |
-| `browse_category`, `search_suggestions`, `get_product`, `find_stores`, `get_delivery_selection`, `get_delivery_timeslots`, `reserve_delivery_timeslot`, `get_cart`, `add_to_cart`, `update_cart_item_quantity` (increase) | request and response captured, parsers tested against the real responses |
+| `carrefour_browser_login`, `carrefour_session_status`, `get_cart`, `get_delivery_timeslots`, `reserve_delivery_timeslot`, `add_to_cart` | **tested end to end** through the MCP server on a real account |
+| `browse_category`, `search_suggestions`, `get_product`, `find_stores`, `get_delivery_selection`, `update_cart_item_quantity` (increase) | request and response captured, parsers tested against the real responses |
 | `update_cart_item_quantity` with `decrease: true` | same endpoint; `decrease=true` is what the site's own "−" button sends, but no capture of it yet |
 | `search_products` | **not captured.** The site's "most searched" links point to `FactFinder-Search?q=…`; whether it returns a parsable grid and honours `start`/`sz` is still to be confirmed |
 
