@@ -284,6 +284,9 @@ function store(s: StoreJson | undefined | null) {
       .join(', '),
   };
   if (typeof s.distance === 'number') out.distance_km = Math.round(s.distance * 10) / 10;
+  // A pickup reservation is made with the store's own CAP and city.
+  if (s.postalCode) out.cap = s.postalCode;
+  if (s.city) out.city = s.city;
   return out;
 }
 
@@ -381,6 +384,10 @@ export function sfccError(data: unknown): { code?: string; message: string } | n
   if (typeof data !== 'object' || data === null) return null;
   const body = data as Record<string, unknown>;
   if (typeof body.error === 'string' && body.error) return { code: body.error, message: body.error };
+  if (body.success === false) {
+    const message = [body.msg, body.message, body.errorMessage].find((m) => typeof m === 'string' && m);
+    return { message: message ? textOf(message as string) : 'carrefour.it reported a failure' };
+  }
   if (body.error === true) {
     const message = typeof body.errorMessage === 'string' ? textOf(body.errorMessage) : 'carrefour.it reported an error';
     return { message };

@@ -10,8 +10,9 @@ A port of [maximeallanic/CarrefourDriveMCP](https://github.com/maximeallanic/Car
 carrefour.it is a Salesforce Commerce Cloud storefront, so every endpoint, the
 login and the response parsing were rewritten from real carrefour.it traffic.
 
-**19 tools.** 11 carrefour.it endpoints described as JSON and run by a generic
-executor, 4 checkout tools, and 4 session-management tools.
+**27 tools.** 14 carrefour.it endpoints described as JSON and run by a generic
+executor, 9 tools written in code for the checkout, shopping lists and bulk cart
+operations, and 4 session-management tools.
 
 ```
 "Quanto costa il latte senza lattosio?"         → search_products
@@ -188,7 +189,7 @@ the server fetches a CSRF token (`…/CSRF-Generate`) right before sending it.
 | --- | --- |
 | `get_addresses` 🔒 | saved delivery addresses (`…/Account-AddressBook`) |
 | `apply_coupon` 🔒✍️ | discount code (`…/CheckoutServices-AddCoupon`) |
-| `prepare_checkout` 🔒✍️ | reserves the slot, opens `/checkout/begin`, submits the address (`/checkout/shipping-submit`), validates it against the delivery CAP and sets the slot (`…/Checkout-UpdateTimeslot`); returns items, delivery cost and total. **Orders nothing.** Home delivery only. |
+| `prepare_checkout` 🔒✍️ | reserves the slot, opens `/checkout/begin`, submits the address (`/checkout/shipping-submit`), validates it against the delivery CAP and sets the slot (`…/Checkout-UpdateTimeslot`); returns items, delivery cost and total. **Orders nothing.** Home delivery, or pickup in store (`shippingMethodId: pickup_in_store`, with the store's `cap` and `city` from `find_stores`; no address is submitted). |
 | `place_order` 🔒✍️ | **creates the order** (`/checkout/payment`) and opens the payment page in your browser |
 
 Ordering is a two-step, human-approved flow:
@@ -203,6 +204,20 @@ Ordering is a two-step, human-approved flow:
    is a human step by design; the server never sees payment credentials.
 
 Only PayPal (`MP_PAYPAL`) is supported so far: it is the only method captured.
+Drive is not supported yet.
+
+### Shopping lists & bulk cart
+
+| Tool | Endpoint |
+| --- | --- |
+| `get_shopping_lists` 🔒 | GET /account/wishlist (page, parsed) |
+| `get_shopping_list` 🔒 | GET /wishlist?id=… (page, parsed) |
+| `create_shopping_list` 🔒 | POST …/Wishlist-NewList |
+| `add_to_shopping_list` 🔒 | POST …/Wishlist-AddPrd |
+| `remove_from_shopping_list` 🔒 | POST …/Wishlist-RemovePrd |
+| `add_shopping_list_to_cart` 🔒✍️ | the list's products in one POST /cart/add-product (`pidsObj`) |
+| `add_products_to_cart` 🔒✍️ | several products and quantities in one POST /cart/add-product |
+| `empty_cart` 🔒✍️ | POST …/Cart-EmptyCart (needs `confirm: true`), then checks the cart is empty |
 
 ## What is verified
 
@@ -214,7 +229,14 @@ response parsers are unit-tested on trimmed copies of those responses.
 The 4 checkout tools follow a captured real order call for call, the whole
 chain is unit-tested against those answers, and `prepare_checkout` and
 `place_order` were then run end to end on the live site, up to the payment page
-opening in the user's browser.
+opening in the user's browser — for home delivery. Pickup in store follows a
+captured order too, but has not been run through the server yet.
+
+The shopping-list writes, `add_shopping_list_to_cart`, `add_products_to_cart`
+and `empty_cart` follow captured traffic and are unit-tested, not yet run
+through the server. `get_shopping_lists` and `get_shopping_list` parse pages
+that were **not captured** — the parsers rely on markup seen elsewhere on the
+site and still need confirming on the live site.
 
 ## How authentication works
 

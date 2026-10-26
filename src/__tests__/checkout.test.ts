@@ -60,6 +60,8 @@ const ORDER = {
   },
 };
 
+const PICKUP_CART = '<div class="line-item-card"></div>';
+
 /** The happy path, per endpoint. Tests override single answers. */
 function happy(req: FetchRequest): unknown {
   const path = new URL(req.url).pathname;
@@ -69,6 +71,7 @@ function happy(req: FetchRequest): unknown {
   if (path.endsWith('TimeSlotApi-ReserveTimeSlot')) return { error: false, reservedTimeslot: { shipmentUUID: 'ship-1' } };
   if (path === '/checkout/shipping-submit') return { order: ORDER, queryString: 'csrf_token=TOKEN' };
   if (path.endsWith('CheckoutShippingServices-ValidateShippingAddress')) return { error: false };
+  if (path.endsWith('Minicart-Show')) return PICKUP_CART;
   if (path.endsWith('Checkout-UpdateTimeslot')) return { error: false, csrf: { token: 'TOKEN' }, timeslotDateFormatted: 'Giovedì 29 ottobre | 17:00 - 21:00' };
   if (path === '/checkout/payment') {
     return {
@@ -255,4 +258,36 @@ test('apply_coupon turns SFCC field errors into a tool error', async () => {
   assert.equal(res.isError, true);
   assert.match(res.text, /couponCode: Il codice sconto non è stato riconosciuto/);
   assert.equal(form(calls.find((r) => step(r) === 'CheckoutServices-AddCoupon')!).couponCode, '12345');
+});
+
+test('prepare_checkout for pickup reserves with the store CAP and submits no address', async () => {
+  const c = await client();
+  const res = await run(c, 'prepare_checkout', {
+    ...SLOT,
+    shippingMethodId: 'pickup_in_store',
+    storeId: '0551',
+    store_cap: '10040',
+    store_city: "LEINI'",
+  });
+  assert.equal(res.isError, false, res.text);
+
+  const reserve = form(calls.find((r) => step(r) === 'TimeSlotApi-ReserveTimeSlot')!);
+  assert.equal(reserve.shippingMethodId, 'pickup_in_store');
+  assert.equal(reserve.cap, '10040');
+  assert.equal(reserve.city, "LEINI'");
+  assert.equal('address' in reserve, false, 'the site sends no address fields for pickup');
+  assert.equal(calls.some((r) => step(r) === 'Account-AddressBook' || step(r) === 'shipping-submit'), false);
+  assert.ok(calls.some((r) => step(r) === 'Checkout-UpdateTimeslot'));
+  assert.match(res.text, /ritiro in negozio 0551/);
+
+  const placed = await run(c, 'place_order', { confirm: true });
+  assert.equal(placed.isError, false, placed.text);
+});
+
+test('prepare_checkout for pickup needs the store CAP and city', async () => {
+  const c = await client();
+  const res = await run(c, 'prepare_checkout', { ...SLOT, shippingMethodId: 'pickup_in_store' });
+  assert.equal(res.isError, true);
+  assert.match(res.text, /store_cap and store_city/);
+  assert.equal(calls.some((r) => step(r) === 'TimeSlotApi-ReserveTimeSlot'), false);
 });

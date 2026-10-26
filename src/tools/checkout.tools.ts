@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { CARREFOUR_ORIGIN, SFCC_BASE, sessionService, NO_SESSION_MESSAGE } from '../services/session.service.js';
-import { getCsrfToken, isLoggedIn } from '../services/auth.service.js';
-import { httpService } from '../services/http.service.js';
+import { CARREFOUR_ORIGIN, SFCC_BASE } from '../services/session.service.js';
+import { getCsrfToken } from '../services/auth.service.js';
 import { browserService } from '../services/browser.service.js';
 import { openInUserBrowser } from '../services/browser-login.js';
-import { sfccError, stripEnvelope, textOf } from '../spec/extract.js';
+import { SfccError, check, requireSignedIn, sfccHtml, sfccJson, type Json } from '../services/sfcc.service.js';
+import { extractCart, stripEnvelope, textOf } from '../spec/extract.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -26,52 +26,13 @@ import { logger } from '../utils/logger.js';
  * JSON tool definitions cannot express, hence code.
  */
 
-const XHR = { accept: 'application/json, text/plain, */*', 'x-requested-with': 'XMLHttpRequest' };
 /** place_order only follows a prepare_checkout this recent. */
 const PREPARED_TTL_MS = 30 * 60_000;
 /** Payment methods seen in real traffic. Others exist on the site but were not captured. */
 const PAYMENT_METHODS = ['MP_PAYPAL'] as const;
 
-type Json = Record<string, unknown>;
-
 function text(body: string, isError = false) {
   return { content: [{ type: 'text' as const, text: body }], isError };
-}
-
-class CheckoutError extends Error {}
-
-async function call(
-  method: 'GET' | 'POST',
-  url: string,
-  opts: { form?: Record<string, string>; query?: Record<string, string> } = {}
-): Promise<Json> {
-  const target = new URL(url);
-  for (const [k, v] of Object.entries(opts.query ?? {})) target.searchParams.set(k, v);
-  let body: FormData | undefined;
-  if (opts.form) {
-    body = new FormData();
-    for (const [k, v] of Object.entries(opts.form)) body.append(k, v);
-  }
-  const result = await httpService.send({ method, url: target.toString(), headers: { ...XHR }, body });
-  if (!result.ok) throw new CheckoutError(`HTTP ${result.status} on ${target.pathname}`);
-  if (typeof result.data !== 'object' || result.data === null) {
-    throw new CheckoutError(`${target.pathname} did not answer with JSON — the session may have expired.`);
-  }
-  return result.data as Json;
-}
-
-/** Throw the SFCC-reported failure of `step`, if any. */
-function check(step: string, data: Json): Json {
-  const failure = sfccError(data);
-  if (failure) throw new CheckoutError(`${step}: ${failure.message}`);
-  return data;
-}
-
-async function requireSignedIn(): Promise<void> {
-  if (!sessionService.hasSession()) throw new CheckoutError(NO_SESSION_MESSAGE);
-  if ((await isLoggedIn()) === false) {
-    throw new CheckoutError(`carrefour.it no longer sees you as signed in.\n\n${NO_SESSION_MESSAGE}`);
-  }
 }
 
 // --- Address book --------------------------------------------------------------
@@ -94,7 +55,7 @@ export interface SavedAddress {
 }
 
 async function addressBook(): Promise<SavedAddress[]> {
-  const data = check('Account-AddressBook', await call('GET', `${SFCC_BASE}/Account-AddressBook`));
+  const data = check('Account-AddressBook', await sfccJson('GET', `${SFCC_BASE}/Account-AddressBook`));
   return Array.isArray(data.addressList) ? (data.addressList as SavedAddress[]) : [];
 }
 
@@ -206,7 +167,7 @@ export function registerCheckoutTools(server: McpServer): void {
         await requireSignedIn();
         const data = check(
           'Coupon',
-          await call('POST', `${SFCC_BASE}/CheckoutServices-AddCoupon`, {
+          await sfccJson('POST', `${SFCC_BASE}/CheckoutServices-AddCoupon`, {
             form: { csrf_token: await getCsrfToken(), couponCode: code },
           })
         );
@@ -219,56 +180,71 @@ export function registerCheckoutTools(server: McpServer): void {
 
   server.tool(
     'prepare_checkout',
-    'Prepares a home-delivery order WITHOUT placing it: reserves the timeslot, sets the saved delivery address and ' +
-      'checks it matches the delivery CAP, then returns the order summary — items, delivery cost and total to pay. ' +
-      'Show that summary to the user and get their explicit approval before calling place_order. ' +
+    'Prepares an order WITHOUT placing it, for home delivery or pickup in store: reserves the timeslot, sets the ' +
+      'saved delivery address (delivery only) and checks it matches the delivery CAP, sets the slot, then returns the ' +
+      'order summary. Show that summary to the user and get their explicit approval before calling place_order. ' +
       'Take the timeslot values from get_delivery_timeslots and the store from find_stores.',
     {
+      shippingMethodId: z
+        .enum(['delivery', 'pickup_in_store'])
+        .optional()
+        .describe("'delivery' (home delivery, default) or 'pickup_in_store' (Ritiro in negozio)."),
       timeslotId: z.string().describe('timeslot_id from get_delivery_timeslots.'),
       timeslotStart: z.string().describe('start from get_delivery_timeslots, unchanged.'),
       timeslotEnd: z.string().describe('end from get_delivery_timeslots, unchanged.'),
       timeslotEco: z.boolean().describe('eco flag from get_delivery_timeslots.'),
-      storeId: z.string().describe('Delivering store ID, from find_stores (delivery).'),
+      storeId: z.string().describe('Store ID from find_stores, under the chosen shipping method.'),
+      store_cap: z.string().optional().describe("Pickup only: the store's cap, from find_stores."),
+      store_city: z.string().optional().describe("Pickup only: the store's city, from find_stores, unchanged."),
       address_id: z
         .string()
         .optional()
-        .describe('address_id from get_addresses. May be left out when the account has a single address.'),
-      floor: z.string().optional().describe('Override the saved floor.'),
-      intercomName: z.string().optional().describe('Override the name on the intercom.'),
-      phone: z.string().optional().describe('Override the contact phone (without prefix).'),
-      phonePrefix: z.string().optional().describe("Phone prefix, default '+39'."),
+        .describe('Delivery only: address_id from get_addresses. May be left out when the account has a single address.'),
+      floor: z.string().optional().describe('Delivery only: override the saved floor.'),
+      intercomName: z.string().optional().describe('Delivery only: override the name on the intercom.'),
+      phone: z.string().optional().describe('Delivery only: override the contact phone (without prefix).'),
+      phonePrefix: z.string().optional().describe("Delivery only: phone prefix, default '+39'."),
     },
     async (args) => {
+      const pickup = args.shippingMethodId === 'pickup_in_store';
       try {
         await requireSignedIn();
         prepared = null;
 
-        const book = await addressBook();
-        const address = args.address_id
-          ? book.find((a) => a.customerAddressUUID === args.address_id)
-          : book.length === 1
-            ? book[0]
-            : undefined;
-        if (!address) {
-          throw new CheckoutError(
-            book.length === 0
-              ? 'No saved address. Add one on carrefour.it first.'
-              : 'Pick an address: pass address_id from get_addresses.'
-          );
+        let chosen: SavedAddress | undefined;
+        if (pickup) {
+          if (!args.store_cap || !args.store_city) {
+            throw new SfccError('Pickup needs store_cap and store_city: take them from the store in find_stores.');
+          }
+        } else {
+          const book = await addressBook();
+          const address = args.address_id
+            ? book.find((a) => a.customerAddressUUID === args.address_id)
+            : book.length === 1
+              ? book[0]
+              : undefined;
+          if (!address) {
+            throw new SfccError(
+              book.length === 0
+                ? 'No saved address. Add one on carrefour.it first.'
+                : 'Pick an address: pass address_id from get_addresses.'
+            );
+          }
+          chosen = {
+            ...address,
+            ...(args.floor !== undefined ? { floor: args.floor } : {}),
+            ...(args.intercomName !== undefined ? { intercomName: args.intercomName } : {}),
+            ...(args.phone !== undefined ? { phone: args.phone } : {}),
+          };
         }
-        const chosen: SavedAddress = {
-          ...address,
-          ...(args.floor !== undefined ? { floor: args.floor } : {}),
-          ...(args.intercomName !== undefined ? { intercomName: args.intercomName } : {}),
-          ...(args.phone !== undefined ? { phone: args.phone } : {}),
-        };
 
-        // 1. The reservation ties the slot to the cart and names the shipment.
+        // 1. The reservation ties the slot to the cart and names the shipment. Delivery sends the
+        //    customer's CAP and city, pickup the store's; the site never fills address/streetNumber.
         const reservation = check(
           'Timeslot reservation',
-          await call('POST', `${SFCC_BASE}/TimeSlotApi-ReserveTimeSlot`, {
+          await sfccJson('POST', `${SFCC_BASE}/TimeSlotApi-ReserveTimeSlot`, {
             form: {
-              shippingMethodId: 'delivery',
+              shippingMethodId: pickup ? 'pickup_in_store' : 'delivery',
               timeslotId: args.timeslotId,
               timeslotStart: args.timeslotStart,
               timeslotEnd: args.timeslotEnd,
@@ -279,48 +255,63 @@ export function registerCheckoutTools(server: McpServer): void {
               reorder: 'false',
               redirectParams: 'null',
               csrf_token: await getCsrfToken(),
-              city: chosen.city ?? '',
-              cap: chosen.postalCode ?? '',
-              // The site leaves these empty: the address is set at shipping-submit.
-              address: '',
-              state: chosen.stateCode ?? '',
-              streetNumber: '',
+              ...(pickup
+                ? { city: args.store_city!, cap: args.store_cap! }
+                : {
+                    city: chosen!.city ?? '',
+                    cap: chosen!.postalCode ?? '',
+                    address: '',
+                    state: chosen!.stateCode ?? '',
+                    streetNumber: '',
+                  }),
             },
           })
         );
         const shipmentUUID = (reservation.reservedTimeslot as { shipmentUUID?: string } | undefined)?.shipmentUUID;
-        if (!shipmentUUID) throw new CheckoutError('The timeslot reservation did not return a shipment.');
+        if (!shipmentUUID) throw new SfccError('The timeslot reservation did not return a shipment.');
 
         // 2. Open the checkout like the site does; it bounces to /cart when something is off.
         const begin = await browserService.visit(`${CARREFOUR_ORIGIN}/checkout/begin?cart=1&rurl=2`);
         const landed = new URL(begin.finalUrl);
         if (!landed.pathname.startsWith('/checkout')) {
-          throw new CheckoutError(
+          throw new SfccError(
             `carrefour.it refused to open the checkout and sent back to ${landed.pathname}${landed.search}. ` +
               'Check the cart (minimum order, unavailable products) and that the delivery CAP matches the address.'
           );
         }
 
-        // 3. Delivery address.
-        const shipping = check(
-          'Delivery address',
-          await call('POST', `${CARREFOUR_ORIGIN}/checkout/shipping-submit`, {
-            form: {
-              isOnlyPickupInStore: 'false',
-              csrf_token: await getCsrfToken(),
-              originalShipmentUUID: shipmentUUID,
-              shipmentUUID,
-              ...shippingForm(chosen, args.phonePrefix ?? '+39'),
-              shippingPhonePrefix: args.phonePrefix ?? '+39',
-            },
-          })
-        );
-        check('Address check', await call('GET', `${SFCC_BASE}/CheckoutShippingServices-ValidateShippingAddress`));
+        // 3. Delivery address — pickup has none to submit.
+        let summary: Json;
+        if (!pickup) {
+          const shipping = check(
+            'Delivery address',
+            await sfccJson('POST', `${CARREFOUR_ORIGIN}/checkout/shipping-submit`, {
+              form: {
+                isOnlyPickupInStore: 'false',
+                csrf_token: await getCsrfToken(),
+                originalShipmentUUID: shipmentUUID,
+                shipmentUUID,
+                ...shippingForm(chosen!, args.phonePrefix ?? '+39'),
+                shippingPhonePrefix: args.phonePrefix ?? '+39',
+              },
+            })
+          );
+          summary = summarizeOrder(shipping.order as OrderJson | undefined);
+        } else {
+          const cart = extractCart(await sfccHtml('GET', `${SFCC_BASE}/Minicart-Show`, { query: { cents: 'false' } }));
+          summary = {
+            products_total: cart.total_products,
+            item_count: cart.item_count,
+            items: cart.items.map((i) => ({ ean: i.ean, name: i.name, quantity: i.quantity_in_cart, price: i.price })),
+            note: 'Any pickup fee is shown on the payment page.',
+          };
+        }
+        check('Address check', await sfccJson('GET', `${SFCC_BASE}/CheckoutShippingServices-ValidateShippingAddress`));
 
         // 4. The slot on the shipment.
         const slot = check(
           'Timeslot',
-          await call('POST', `${SFCC_BASE}/Checkout-UpdateTimeslot`, {
+          await sfccJson('POST', `${SFCC_BASE}/Checkout-UpdateTimeslot`, {
             form: {
               uuid: shipmentUUID,
               timeslotId: args.timeslotId,
@@ -332,12 +323,14 @@ export function registerCheckoutTools(server: McpServer): void {
           })
         );
 
-        const summary = summarizeOrder(shipping.order as OrderJson | undefined);
         const timeslot = typeof slot.timeslotDateFormatted === 'string' ? textOf(slot.timeslotDateFormatted) : '';
-        prepared = { at: Date.now(), total: summary.total_to_pay, address: describeAddress(chosen), timeslot };
+        const where = pickup
+          ? `ritiro in negozio ${args.storeId}, ${args.store_city}`
+          : `consegna a ${describeAddress(chosen!)}`;
+        prepared = { at: Date.now(), total: summary.total_to_pay ?? summary.products_total, address: where, timeslot };
 
         return text(
-          JSON.stringify({ status: 'ready — NOT ordered yet', address: prepared.address, timeslot, ...summary }, null, 2) +
+          JSON.stringify({ status: 'ready — NOT ordered yet', where, timeslot, ...summary }, null, 2) +
             '\n\nNothing is ordered yet. Show this summary to the user; only once they explicitly approve it, call ' +
             'place_order with confirm=true. The timeslot reservation expires 45 minutes after it was made.'
         );
@@ -372,7 +365,7 @@ export function registerCheckoutTools(server: McpServer): void {
         await requireSignedIn();
         const data = check(
           'Order',
-          await call('POST', `${CARREFOUR_ORIGIN}/checkout/payment`, {
+          await sfccJson('POST', `${CARREFOUR_ORIGIN}/checkout/payment`, {
             form: {
               paymentOptions: payment_method ?? 'MP_PAYPAL',
               billingAddressEnabled: 'false',
@@ -383,7 +376,7 @@ export function registerCheckoutTools(server: McpServer): void {
           })
         );
         const redirectUrl = typeof data.redirectUrl === 'string' ? data.redirectUrl : '';
-        if (!redirectUrl) throw new CheckoutError('carrefour.it did not return a payment page.');
+        if (!redirectUrl) throw new SfccError('carrefour.it did not return a payment page.');
         const orderNumber = new URL(redirectUrl).searchParams.get('orderNumber') ?? 'unknown';
         const placed = prepared;
         prepared = null;
@@ -392,7 +385,7 @@ export function registerCheckoutTools(server: McpServer): void {
         logger.info('Order placed, payment page handed to the user', { orderNumber, browser: window.browser });
         return text(
           [
-            `Order ${orderNumber} created on carrefour.it — total ${String(placed.total)}, delivery ${placed.timeslot} to ${placed.address}.`,
+            `Order ${orderNumber} created on carrefour.it — total ${String(placed.total)}, ${placed.address}, ${placed.timeslot}.`,
             '',
             window.opened
               ? `The payment page is open in ${window.browser}. Complete the payment there (PayPal sign-in and checks).`

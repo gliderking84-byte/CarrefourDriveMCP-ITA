@@ -1,0 +1,42 @@
+{
+  "name": "create_shopping_list",
+  "description": "Creates a new shopping list (lista della spesa / lista desideri) in the signed-in customer's carrefour.it account. Returns its listID, to use with add_to_shopping_list.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Name of the list, e.g. 'Spesa settimanale'."
+      }
+    },
+    "required": [
+      "name"
+    ]
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT/Wishlist-NewList",
+    "headers": {
+      "accept": "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest"
+    },
+    "query": {},
+    "body": {
+      "listName": {
+        "$param": "name"
+      },
+      "listID": ""
+    },
+    "content_type": "multipart/form-data"
+  },
+  "requires_auth": true,
+  "response": {
+    "extract": "json",
+    "pick": [
+      "success",
+      "listID",
+      "listName",
+      "listNumber"
+    ]
+  }
+}
