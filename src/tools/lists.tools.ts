@@ -3,7 +3,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { CARREFOUR_ORIGIN, SFCC_BASE } from '../services/session.service.js';
 import { getCsrfToken } from '../services/auth.service.js';
 import { SfccError, check, requireSignedIn, sfccHtml, sfccJson } from '../services/sfcc.service.js';
-import { decodeEntities, extractCart, extractProductGrid, parseProduct, textOf, type Product } from '../spec/extract.js';
+import { decodeEntities, extractCart, parseProduct, textOf, type Product } from '../spec/extract.js';
 
 /**
  * Shopping lists ("lista desideri") and bulk cart operations.
@@ -64,21 +64,31 @@ export function parseShoppingLists(html: string): ShoppingList[] {
   return [...lists.values()];
 }
 
-/** The products on a /wishlist?id=… page: product tiles, or any element carrying data-pid. */
+/**
+ * The products on a /wishlist?id=… page. Each is a `<div class="product tile">`
+ * carrying `data-product-json`; the list container's `data-pids` names every EAN
+ * in the list, including any the infinite scroll has not rendered yet.
+ */
 export function parseShoppingListProducts(html: string): Product[] {
-  const grid = extractProductGrid(html).products;
-  if (grid.length > 0) return grid;
-  const seen = new Set<string>();
-  const products: Product[] = [];
-  const starts = [...html.matchAll(/\sdata-pid="/g)].map((m) => m.index!);
+  const products = new Map<string, Product>();
+  const starts = [...html.matchAll(/<(?:div|article)\s[^>]*?class="product tile/g)].map((m) => m.index!);
   starts.forEach((from, i) => {
     const product = parseProduct(html.slice(from, starts[i + 1] ?? html.length));
-    if (product && !seen.has(product.ean)) {
-      seen.add(product.ean);
-      products.push(product);
-    }
+    if (product && !products.has(product.ean)) products.set(product.ean, product);
   });
-  return products;
+
+  const listed = html.match(/data-pids="([^"]*)"/)?.[1];
+  if (listed) {
+    try {
+      for (const ean of JSON.parse(decodeEntities(listed)) as unknown[]) {
+        const id = String(ean);
+        if (!products.has(id)) products.set(id, { ean: id, name: '' });
+      }
+    } catch {
+      // A malformed attribute leaves the rendered tiles.
+    }
+  }
+  return [...products.values()];
 }
 
 async function readList(listId: string): Promise<Product[]> {

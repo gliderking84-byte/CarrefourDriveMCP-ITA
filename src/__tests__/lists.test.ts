@@ -126,11 +126,28 @@ test('redactTokens hides the CSRF tokens a page embeds', async () => {
   assert.equal(/SECRET/.test(redactTokens(page)), false);
 });
 
-test('parseShoppingListProducts reads tiles, or any element carrying data-pid', () => {
-  assert.deepEqual(parseShoppingListProducts(tile('111') + tile('222')).map((p) => p.ean), ['111', '222']);
-  const loose = `<div class="wishlist-item" data-pid="333" data-product-json="${q({ id: '333', name: 'X' })}"></div>
-                 <div class="wishlist-item" data-pid="333"></div><li data-pid="444"></li>`;
-  assert.deepEqual(parseShoppingListProducts(loose).map((p) => p.ean), ['333', '444']);
+test('parseShoppingListProducts reads the list tiles and every EAN in data-pids', () => {
+  const page = `
+    <div data-component="wishlistInfiniteScrollComponent" data-pids="[&quot;111&quot;,&quot;222&quot;,&quot;333&quot;]"
+      data-list-id="aaa111">
+      <div class="product-item wishlist-tile">
+      <div
+        class="product tile product-item-with-tooltip  "
+        data-component="wishlistItemComponent"
+        data-option-product-price="${q({ sales: { value: 3.29 }, list: { value: 3.99 } })}"
+        data-product-json="${q({ name: 'Tonno 2 x 80 g', id: '111', price: '3.29', brand: 'Marca' })}" data-option-index="null">
+        <a class="product-link " href="/p/tonno/111.html"></a>
+        <button data-option-pid="111" data-option-listid="aaa111"></button>
+      </div></div>
+      <div class="product-item wishlist-tile"><div class="product tile" data-product-json="${q({ name: 'Pasta', id: '222' })}"></div></div>
+    </div>`;
+  const products = parseShoppingListProducts(page);
+  assert.deepEqual(products.map((p) => p.ean), ['111', '222', '333']);
+  assert.equal(products[0].name, 'Tonno 2 x 80 g');
+  assert.equal(products[0].price, 3.29);
+  assert.equal(products[0].list_price, 3.99);
+  assert.equal(products[0].url, 'https://www.carrefour.it/p/tonno/111.html');
+  assert.deepEqual(products[2], { ean: '333', name: '' }, 'not rendered yet, but still in the list');
 });
 
 test('add_shopping_list_to_cart sends the whole list in one pidsObj call', async () => {

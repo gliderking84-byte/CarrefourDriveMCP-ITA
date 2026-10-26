@@ -234,9 +234,9 @@ captured order too, but has not been run through the server yet.
 
 The shopping-list writes, `add_shopping_list_to_cart`, `add_products_to_cart`
 and `empty_cart` follow captured traffic and are unit-tested, not yet run
-through the server. `get_shopping_lists` and `get_shopping_list` parse pages
-that were **not captured** — the parsers rely on markup seen elsewhere on the
-site and still need confirming on the live site.
+through the server. `get_shopping_lists` and `get_shopping_list` parse the
+/account/wishlist and /wishlist pages; their parsers were fixed against the
+pages the server received from the live site (`CARREFOUR_DEBUG_HTML`).
 
 ## How authentication works
 
