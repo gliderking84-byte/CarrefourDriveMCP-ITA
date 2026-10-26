@@ -1,7 +1,7 @@
 {
   "name": "carrefour-it-mcp",
   "version": "3.0.0",
-  "description": "MCP server for Carrefour Italia (carrefour.it) \u2014 search the Spesa Online catalogue, find stores, book a delivery or pickup slot and manage your cart from Claude, Cursor or any MCP client",
+  "description": "MCP server for Carrefour Italia (carrefour.it) — search the Spesa Online catalogue, find stores, book a delivery or pickup slot and manage your cart from Claude, Cursor or any MCP client",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
@@ -51,10 +51,10 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.8.0",
     "dotenv": "^16.4.5",
+    "playwright": "^1.50.0",
     "tough-cookie": "^4.1.4",
-    "zod": "^3.24.0",
     "winston": "^3.13.0",
-    "playwright": "^1.50.0"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
