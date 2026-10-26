@@ -14,7 +14,7 @@ const LOGIN_WAIT_MS = parseInt(process.env.CARREFOUR_LOGIN_WAIT_MS || '45000', 1
 const PROGRESS_EVERY_MS = 5000;
 
 const WINDOW_OPEN_MESSAGE =
-  'A browser window is open on carrefour.it/login. Sign in there and leave it open: it closes by ' +
+  'A browser window is open on the carrefour.it login page. Sign in there and leave it open: it closes by ' +
   'itself once the session is captured. Then run carrefour_session_status with verify=true to confirm.';
 
 function loginStateLine(): string {

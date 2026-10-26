@@ -20,8 +20,12 @@ export function isPlaywrightAvailable(): boolean {
   }
 }
 
-/** The SFCC login page; a successful sign-in redirects away from it (to `/` by default). */
-const LOGIN_URL = `${CARREFOUR_ORIGIN}/login`;
+/**
+ * The login form for private customers. Plain `/login` first asks to choose
+ * between private and business accounts (`/login/selezione`); `type=b2c` skips
+ * that step. A successful sign-in redirects away from `/login` (to `/account`).
+ */
+const LOGIN_URL = `${CARREFOUR_ORIGIN}/login?type=b2c`;
 const POLL_MS = 2000;
 
 export interface BrowserLoginOptions {

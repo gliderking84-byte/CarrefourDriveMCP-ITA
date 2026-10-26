@@ -112,7 +112,8 @@ carrefour.it gates its login form with a **Cloudflare Turnstile** captcha, so
 signing in is interactive:
 
 1. Ask your agent to run **`carrefour_browser_login`**.
-2. A browser window opens on `carrefour.it/login`. Sign in yourself.
+2. A browser window opens on the private-customer login page
+   (`carrefour.it/login?type=b2c`). Sign in yourself.
 3. **Don't close the window** — the server notices it left the login page, reads
    the session cookies from memory, checks that carrefour.it sees you as signed
    in, and closes it.
