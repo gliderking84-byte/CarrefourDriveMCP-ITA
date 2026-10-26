@@ -186,13 +186,10 @@ Checkout and payment are deliberately **not** exposed.
 
 ## What is verified
 
-Every endpoint above was observed in real carrefour.it traffic, except one:
-
-| Tool | Status |
-| --- | --- |
-| `carrefour_browser_login`, `carrefour_session_status`, `get_cart`, `get_delivery_timeslots`, `reserve_delivery_timeslot`, `add_to_cart`, `update_cart_item_quantity` (`decrease: true`) | **tested end to end** through the MCP server on a real account |
-| `browse_category`, `search_suggestions`, `get_product`, `find_stores`, `get_delivery_selection`, `update_cart_item_quantity` (increase) | request and response captured, parsers tested against the real responses |
-| `search_products` | **not captured.** The site's "most searched" links point to `FactFinder-Search?q=…`; whether it returns a parsable grid and honours `start`/`sz` is still to be confirmed |
+All 15 tools were tested end to end through the MCP server on a real
+carrefour.it account (MCP Inspector, October 2026), and every endpoint was first
+observed in real browser traffic. The response parsers are unit-tested on
+trimmed copies of those responses.
 
 ## How authentication works
 
