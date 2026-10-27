@@ -221,22 +221,12 @@ Drive is not supported yet.
 
 ## What is verified
 
-The 15 catalogue, delivery, cart and session tools were tested end to end
-through the MCP server on a real carrefour.it account (MCP Inspector, October
-2026), and every endpoint was first observed in real browser traffic. The
-response parsers are unit-tested on trimmed copies of those responses.
-
-The 4 checkout tools follow a captured real order call for call, the whole
-chain is unit-tested against those answers, and `prepare_checkout` and
-`place_order` were then run end to end on the live site, up to the payment page
-opening in the user's browser — for home delivery. Pickup in store follows a
-captured order too, but has not been run through the server yet.
-
-The shopping-list writes, `add_shopping_list_to_cart`, `add_products_to_cart`
-and `empty_cart` follow captured traffic and are unit-tested, not yet run
-through the server. `get_shopping_lists` and `get_shopping_list` parse the
-/account/wishlist and /wishlist pages; their parsers were fixed against the
-pages the server received from the live site (`CARREFOUR_DEBUG_HTML`).
+All 27 tools were tested end to end through the MCP server on a real
+carrefour.it account (MCP Inspector, October 2026): catalogue, stores and
+timeslots, cart, shopping lists, empty cart, and the checkout for home delivery
+and pickup in store, with `place_order` up to the payment page opening in the
+user's browser. Every endpoint was first observed in real browser traffic, and
+the parsers are unit-tested on trimmed copies of the real answers.
 
 ## How authentication works
 
