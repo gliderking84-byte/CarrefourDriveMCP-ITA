@@ -6,7 +6,7 @@ import { schemaToZodShape } from '../spec/params.js';
 test('every tool definition in tools/ loads without failure', () => {
   const { specs, failures, dir } = loadToolSpecs();
   assert.deepEqual(failures, [], `failures in ${dir}: ${JSON.stringify(failures)}`);
-  assert.equal(specs.length, 11, `expected 11 tools, got ${specs.length}`);
+  assert.equal(specs.length, 14, `expected 14 tools, got ${specs.length}`);
 });
 
 test('tool names are unique and MCP-safe', () => {

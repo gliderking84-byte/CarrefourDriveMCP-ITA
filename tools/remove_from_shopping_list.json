@@ -1,0 +1,50 @@
+{
+  "name": "remove_from_shopping_list",
+  "description": "Removes a product (by EAN) from one of the signed-in customer's shopping lists.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "list_id": {
+        "type": "string",
+        "description": "Shopping list ID (list_id from get_shopping_lists or create_shopping_list)."
+      },
+      "ean": {
+        "type": "string",
+        "description": "EAN of a product in the list."
+      }
+    },
+    "required": [
+      "list_id",
+      "ean"
+    ]
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT/Wishlist-RemovePrd",
+    "headers": {
+      "accept": "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest"
+    },
+    "query": {},
+    "body": {
+      "pid": {
+        "$param": "ean"
+      },
+      "options": "",
+      "quantity": "1",
+      "listID": {
+        "$param": "list_id"
+      }
+    },
+    "content_type": "multipart/form-data"
+  },
+  "requires_auth": true,
+  "response": {
+    "extract": "json",
+    "pick": [
+      "success",
+      "msg",
+      "pid"
+    ]
+  }
+}

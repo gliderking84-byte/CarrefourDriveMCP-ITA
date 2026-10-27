@@ -1,0 +1,52 @@
+{
+  "name": "add_to_shopping_list",
+  "description": "Adds a product (by EAN) to one of the signed-in customer's shopping lists. Returns the number of products now in the list.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "list_id": {
+        "type": "string",
+        "description": "Shopping list ID (list_id from get_shopping_lists or create_shopping_list)."
+      },
+      "ean": {
+        "type": "string",
+        "description": "Product EAN."
+      }
+    },
+    "required": [
+      "list_id",
+      "ean"
+    ]
+  },
+  "request": {
+    "method": "POST",
+    "url": "https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT/Wishlist-AddPrd",
+    "headers": {
+      "accept": "application/json, text/plain, */*",
+      "x-requested-with": "XMLHttpRequest"
+    },
+    "query": {},
+    "body": {
+      "listID": {
+        "$param": "list_id"
+      },
+      "pid": {
+        "$param": "ean"
+      }
+    },
+    "content_type": "multipart/form-data"
+  },
+  "requires_auth": true,
+  "response": {
+    "extract": "json",
+    "pick": [
+      "success",
+      "msg",
+      "pid",
+      "listID",
+      "listCount",
+      "isAlreadyInWishlist",
+      "listIsFull"
+    ]
+  }
+}

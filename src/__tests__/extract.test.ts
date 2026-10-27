@@ -176,6 +176,7 @@ test('stores: delivery wrappers and pickup lists flatten to the same shape', () 
     brand: undefined,
     address: 'Via Due 2, MILANO',
     distance_km: 1.2,
+    city: 'MILANO',
   });
 });
 
@@ -239,4 +240,17 @@ test('JSON responses lose the SFCC envelope, including a queryString carrying th
 test('unexpected payloads pass through rather than throwing', () => {
   assert.equal(extract('<html>Cloudflare</html>'), '<html>Cloudflare</html>');
   assert.deepEqual(extract({ error: true, message: 'x' }, { extract: 'timeslots' }), { error: true, message: 'x' });
+});
+
+test('sfccError recognises every way SFCC reports a failure in a 200', async () => {
+  const { sfccError } = await import('../spec/extract.js');
+  assert.deepEqual(sfccError({ error: 'NO_SHIPPING_METHOD_SELECTED' }), {
+    code: 'NO_SHIPPING_METHOD_SELECTED',
+    message: 'NO_SHIPPING_METHOD_SELECTED',
+  });
+  assert.deepEqual(sfccError({ error: true, errorMessage: '<span>CAP</span> errato' }), { message: 'CAP errato' });
+  assert.deepEqual(sfccError({ errorFields: { couponCode: 'non valido' } }), { message: 'couponCode: non valido' });
+  assert.deepEqual(sfccError({ success: false, msg: 'Lista piena' }), { message: 'Lista piena' });
+  assert.equal(sfccError({ success: true, error: null, errorFields: {} }), null);
+  assert.equal(sfccError('<html>'), null);
 });

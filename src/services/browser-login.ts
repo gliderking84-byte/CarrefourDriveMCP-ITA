@@ -310,3 +310,33 @@ export function loginState(): LoginState {
     ? { inProgress: true, startedAt: current.startedAt, browser: current.browser, lastResult }
     : { inProgress: false, lastResult };
 }
+
+/**
+ * Open `url` for the user in a normal browser window — the payment page, which
+ * a human has to go through (PayPal sign-in, hCaptcha, card 3-D Secure).
+ *
+ * It uses the login profile, which holds the carrefour.it session the server
+ * was given at sign-in, so returning from the payment provider lands in the
+ * same session. No debugging port: nothing about this window is automated.
+ */
+export function openInUserBrowser(url: string): { opened: boolean; browser: string; error?: string } {
+  let browser: LoginBrowser;
+  try {
+    browser = findLoginBrowser() ?? playwrightChromium();
+  } catch (error) {
+    return { opened: false, browser: 'none', error: (error as Error).message };
+  }
+  const dir = dataPath('login-profile');
+  mkdirSync(dir, { recursive: true });
+  try {
+    const child = spawn(browser.path, [`--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', url], {
+      stdio: 'ignore',
+      detached: true,
+    });
+    child.once('error', (error) => logger.error('Could not open the payment page', { error: String(error) }));
+    child.unref();
+    return { opened: true, browser: browser.label };
+  } catch (error) {
+    return { opened: false, browser: browser.label, error: (error as Error).message };
+  }
+}

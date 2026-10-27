@@ -5,6 +5,8 @@ import { config } from 'dotenv';
 import { registerSpecTools } from './spec/register.js';
 import { loadToolSpecs } from './spec/loader.js';
 import { registerSessionTools } from './tools/session.tools.js';
+import { registerCheckoutTools } from './tools/checkout.tools.js';
+import { registerListTools } from './tools/lists.tools.js';
 import { startKeepAlive } from './services/auth.service.js';
 import { browserService } from './services/browser.service.js';
 import { logger } from './utils/logger.js';
@@ -15,6 +17,8 @@ export function createServer(): { server: McpServer; toolCount: number } {
   const server = new McpServer({ name: 'carrefour-it', version: '3.0.0' });
 
   registerSessionTools(server);
+  registerCheckoutTools(server);
+  registerListTools(server);
   const load = loadToolSpecs();
   registerSpecTools(server, load);
 

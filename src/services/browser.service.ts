@@ -206,6 +206,17 @@ class BrowserService {
     }
   }
 
+  /**
+   * Navigate the parked page for this origin to `url` and leave it there, so
+   * later in-page requests go out from that page (SFCC's checkout expects its
+   * calls to come from /checkout/begin, which also sets the checkout up).
+   */
+  async visit(url: string): Promise<{ status: number | null; finalUrl: string }> {
+    const page = await this.pageFor(new URL(url).origin);
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded' });
+    return { status: response?.status() ?? null, finalUrl: page.url() };
+  }
+
   /** Mirror the browser's cookies back into the jar so status/refresh can read them. */
   async syncCookies(): Promise<void> {
     try {
