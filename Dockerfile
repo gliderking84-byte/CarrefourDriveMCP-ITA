@@ -44,7 +44,10 @@ COPY src ./src
 COPY tools ./tools
 COPY scripts ./scripts
 COPY docker ./docker
-RUN npx tsc && npm prune --omit=dev
+# A Windows checkout may hand the scripts over with CRLF line endings and no
+# exec bit; normalise both so the entrypoint runs whatever cloned the repo.
+RUN sed -i 's/\r$//' docker/*.sh && chmod +x docker/*.sh \
+ && npx tsc && npm prune --omit=dev
 
 # Run as an unprivileged user; Chromium and Chrome run without their sandbox
 # (CARREFOUR_LOGIN_NO_SANDBOX), so no extra capabilities are needed.
