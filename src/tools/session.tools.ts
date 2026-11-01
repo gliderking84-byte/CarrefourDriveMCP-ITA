@@ -144,7 +144,9 @@ export function registerSessionTools(server: McpServer): void {
         try {
           const result = await Promise.race([login.done, timeout, cancelled]);
           if (result !== null) return text(result, result.startsWith('Browser login failed'));
-          const opened = `${WINDOW_OPEN_MESSAGE} (Browser: ${login.browser}.)`;
+          const desk = process.env.CARREFOUR_DESK_URL;
+          const where = desk ? ` The window is on the server's screen: open ${desk} to see it and sign in there.` : '';
+          const opened = `${WINDOW_OPEN_MESSAGE}${where} (Browser: ${login.browser}.)`;
           return text(login.alreadyRunning ? `Still waiting. ${opened}` : opened);
         } finally {
           clearInterval(ticker);

@@ -325,33 +325,80 @@ The engine (`src/spec/`):
 Adding an endpoint = dropping a new JSON file into `tools/`, plus an extractor
 if the site answers in HTML.
 
-## Run it on another machine (VPS, Docker)
+## Remote access: HTTP mode, Docker and the desk
 
-The server needs a machine that stays on, runs Chromium, and that carrefour.it
-(behind Cloudflare) does not block. A home connection is known to work; a
-datacenter IP may be challenged. **Test a candidate machine before deploying:**
+For a Claude custom connector (web, desktop, mobile), a PWA or the Claude API,
+the server runs over **Streamable HTTP** with its own OAuth, usually in Docker on
+an always-on machine, published through a tunnel.
+
+### 1. Check that the machine can reach carrefour.it
+
+carrefour.it sits behind Cloudflare: a home connection is known to work, a
+datacenter IP may be challenged. Test a candidate machine first:
 
 ```sh
-# on the candidate machine, with Docker
 git clone https://github.com/gliderking84-byte/carrefourdrivemcp-ita.git && cd carrefourdrivemcp-ita
 docker build -t carrefour-it-mcp .
 docker run --rm carrefour-it-mcp scripts/cloudflare-probe.mjs
 ```
 
 `scripts/cloudflare-probe.mjs` (also `npm run probe` without Docker) drives the
-server's own transport — headless Chromium, its user agent, requests issued from
-inside a carrefour.it page — against public pages only, with a throwaway profile
-and no account. It loads a page, repeats the search XHR (Cloudflare often
-challenges after a few requests) and fetches a category grid, then prints
-`VERDICT: PASS` (exit 0) or `VERDICT: BLOCKED` (exit 1). It also prints the
-machine's public IP, looked up through api.ipify.org.
+server's own transport against public pages only, with a throwaway profile and
+no account, and prints `VERDICT: PASS` (exit 0) or `VERDICT: BLOCKED` (exit 1).
+It also prints the machine's public IP, looked up through api.ipify.org.
 
-The image runs the MCP server by default (stdio, as an unprivileged user), with
-sessions and browser profiles in the `/data` volume — keep that volume private:
+### 2. Run it
 
 ```sh
-docker run --rm -i -v carrefour-data:/data carrefour-it-mcp
+cp .env.example .env    # set PUBLIC_URL, MCP_OWNER_PASSPHRASE, TUNNEL_TOKEN (and MCP_API_TOKEN if needed)
+docker compose up -d
 ```
+
+`docker-compose.yml` runs the server and a Cloudflare Tunnel (`cloudflared`): in
+Cloudflare Zero Trust → Networks → Tunnels, route your hostname (e.g.
+`mcp.example.com`) to `http://carrefour:3000`. No port is opened on the router.
+
+Without Docker: `MCP_TRANSPORT=http node dist/index.js` (or `--http`) with the
+same variables.
+
+| Endpoint | What it is |
+| --- | --- |
+| `/mcp` | the MCP endpoint — needs a bearer token |
+| `/.well-known/oauth-protected-resource/mcp`, `/.well-known/oauth-authorization-server`, `/register`, `/authorize`, `/token`, `/revoke` | OAuth 2.1 (dynamic client registration, PKCE) |
+| `/oauth/consent` | where you approve a client with `MCP_OWNER_PASSPHRASE` |
+| `/desk` | the server's screen in your browser (noVNC), behind the same passphrase |
+| `/health` | liveness, no auth |
+
+### 3. Connect Claude
+
+claude.ai → Settings → Connectors → **Add custom connector** →
+`https://mcp.example.com/mcp`. Claude registers itself, opens the consent page,
+and you approve with the passphrase. Access tokens last an hour and refresh
+tokens 30 days (rotated on use), stored hashed in `<data>/oauth.json`. A PWA
+backend or the Claude API's MCP connector can instead send
+`Authorization: Bearer <MCP_API_TOKEN>`.
+
+### 4. Sign in to carrefour.it from anywhere: the desk
+
+In the container the login windows open on a virtual screen (Xvfb). Open
+`https://mcp.example.com/desk`, enter the passphrase, and you see and drive that
+screen from any device: run `carrefour_browser_login` (with `method: "google"`
+for Google) and sign in there. With `CARREFOUR_GOOGLE_RELOGIN=1` you do this
+once; later re-logins happen by themselves. The payment page of `place_order`
+opens on the same screen, and its link is also returned.
+
+The VNC server listens on 127.0.0.1 inside the container only; the desk's
+passphrase-protected WebSocket proxy is the only way in. Wrong passphrases are
+limited to 10 per 15 minutes per address, on the desk and the consent page.
+
+### Security notes
+
+- `MCP_OWNER_PASSPHRASE` (12+ characters) guards your carrefour.it account and,
+  with Google re-login, a Google session: use a long, unique one.
+- Keep the `/data` volume private: it holds sessions, browser profiles and tokens.
+- This is a **single-account** server: whoever passes the consent page acts on
+  the one carrefour.it account it is signed in to. Multi-user support is not
+  built yet.
 
 ## Configuration
 
