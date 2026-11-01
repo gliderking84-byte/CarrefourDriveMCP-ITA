@@ -102,7 +102,7 @@ function absolute(path: string | undefined): string | undefined {
 }
 
 /** Split `html` into the chunks starting at each match of `start`. */
-function chunks(html: string, start: RegExp): string[] {
+export function chunks(html: string, start: RegExp): string[] {
   const indices: number[] = [];
   const re = new RegExp(start.source, start.flags.includes('g') ? start.flags : `${start.flags}g`);
   for (let m = re.exec(html); m; m = re.exec(html)) indices.push(m.index);
