@@ -217,6 +217,23 @@ class BrowserService {
     return { status: response?.status() ?? null, finalUrl: page.url() };
   }
 
+  /**
+   * Follow `url` in a throwaway tab of the signed-in browser until it lands on a
+   * URL matching `until` (e.g. the PayPal page carrefour.it redirects to), and
+   * return that URL. The parked pages are left alone. Throws on timeout.
+   */
+  async followRedirect(url: string, until: RegExp, timeoutMs = 20000): Promise<string> {
+    const context = await this.ensureContext();
+    const page = await context.newPage();
+    try {
+      await page.goto(url, { waitUntil: 'commit', timeout: timeoutMs }).catch(() => undefined);
+      if (!until.test(page.url())) await page.waitForURL(until, { timeout: timeoutMs, waitUntil: 'commit' });
+      return page.url();
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+  }
+
   /** Mirror the browser's cookies back into the jar so status/refresh can read them. */
   async syncCookies(): Promise<void> {
     try {
