@@ -10,9 +10,9 @@ A port of [maximeallanic/CarrefourDriveMCP](https://github.com/maximeallanic/Car
 carrefour.it is a Salesforce Commerce Cloud storefront, so every endpoint, the
 login and the response parsing were rewritten from real carrefour.it traffic.
 
-**27 tools.** 14 carrefour.it endpoints described as JSON and run by a generic
-executor, 9 tools written in code for the checkout, shopping lists and bulk cart
-operations, and 4 session-management tools.
+**32 tools.** 14 carrefour.it endpoints described as JSON and run by a generic
+executor, 14 tools written in code for the checkout, shopping lists, bulk cart
+operations and past orders, and 4 session-management tools.
 
 ```
 "Quanto costa il latte senza lattosio?"         → search_products
@@ -20,6 +20,8 @@ operations, and 4 session-management tools.
 "Book Saturday morning for home delivery."      → get_delivery_timeslots + reserve_delivery_timeslot
 "Add two packs of Barilla spaghetti n.5."       → search_products + add_to_cart
 "What's in my cart, and am I over the minimum?" → get_cart
+"A che punto è il mio ordine? Stampami lo scontrino." → get_order_status + get_order_receipt
+"Riordina la spesa della settimana scorsa."      → reorder_order
 ```
 
 - **Standalone** — no external gateway, no API key. Clone, build, run.
@@ -248,13 +250,29 @@ Drive is not supported yet.
 | `add_products_to_cart` 🔒✍️ | several products and quantities in one POST /cart/add-product |
 | `empty_cart` 🔒✍️ | POST …/Cart-EmptyCart (needs `confirm: true`), then checks the cart is empty |
 
+### Orders
+
+Every order tool takes an optional `order_number` (from `get_orders`); without
+it, the most recent order is used. Customer name, phone, e-mail, loyalty card and
+street address present in the history are never returned.
+
+| Tool | Endpoint |
+| --- | --- |
+| `get_orders` 🔒 | GET …/Order-HistoryOrders: orders, totals, payment, per-shipment method, timeslot, status, available documents |
+| `get_order_status` 🔒 | the same, reduced to one order's status (verifica ordine) |
+| `get_order_details` 🔒 | the history entry plus the products from GET /account/order?orderID=… (page, parsed) |
+| `get_order_receipt` 🔒 | the receipt (PDF on Carrefour's Salesforce file server) and invoice links, to open and print |
+| `reorder_order` 🔒✍️ | GET the shipment's `reorderUrl` (…/Order-Reorder): its products go back into the cart; needs a booked slot |
+
 ## What is verified
 
-All 27 tools were tested end to end through the MCP server on a real
+The first 27 tools were tested end to end through the MCP server on a real
 carrefour.it account (MCP Inspector, October 2026): catalogue, stores and
 timeslots, cart, shopping lists, empty cart, and the checkout for home delivery
 and pickup in store, with `place_order` up to the payment page opening in the
-user's browser. Every endpoint was first observed in real browser traffic, and
+user's browser. The order tools (November 2026) follow captured traffic for the
+history, receipt and reorder; the order detail page was not captured, so its
+product parser relies on the site's usual product markup. Every endpoint was first observed in real browser traffic, and
 the parsers are unit-tested on trimmed copies of the real answers.
 
 ## How authentication works
