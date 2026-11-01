@@ -8,6 +8,8 @@ import { SfccError, check, requireSignedIn, sfccHtml, sfccJson, type Json } from
 import { extractCart, stripEnvelope, textOf } from '../spec/extract.js';
 import { logger } from '../utils/logger.js';
 
+const PAYPAL_REDIRECT_TIMEOUT_MS = parseInt(process.env.PAYPAL_REDIRECT_TIMEOUT_MS || '20000', 10);
+
 /**
  * Checkout on carrefour.it, as captured from a real order:
  *
@@ -381,18 +383,28 @@ export function registerCheckoutTools(server: McpServer): void {
         const placed = prepared;
         prepared = null;
 
-        const window = openInUserBrowser(redirectUrl);
-        logger.info('Order placed, payment page handed to the user', { orderNumber, browser: window.browser });
+        // carrefour.it sends the payment page on to PayPal. The PayPal URL carries its own token, so
+        // it works on any device and opens the PayPal app on a phone: hand that over when we can.
+        let paypalUrl = '';
+        try {
+          paypalUrl = await browserService.followRedirect(redirectUrl, /^https:\/\/([a-z0-9-]+\.)*paypal\.com\//i, PAYPAL_REDIRECT_TIMEOUT_MS);
+        } catch (error) {
+          logger.info('Could not reach the PayPal page from the payment link', { error: String(error) });
+        }
+
+        const window = openInUserBrowser(paypalUrl || redirectUrl);
+        logger.info('Order placed, payment page handed to the user', { orderNumber, browser: window.browser, paypal: Boolean(paypalUrl) });
         return text(
           [
             `Order ${orderNumber} created on carrefour.it — total ${String(placed.total)}, ${placed.address}, ${placed.timeslot}.`,
             '',
+            ...(paypalUrl ? ['Payment link (PayPal — opens the PayPal app on a phone, works on any device):', paypalUrl, ''] : []),
             window.opened
               ? process.env.CARREFOUR_DESK_URL
                 ? `The payment page is open on the server's screen (${process.env.CARREFOUR_DESK_URL}). Pay there, or open this link:`
                 : `The payment page is open in ${window.browser}. Complete the payment there (PayPal sign-in and checks).`
               : `Could not open a browser (${window.error}). Open this link to pay:`,
-            redirectUrl,
+            paypalUrl || redirectUrl,
             '',
             'The order is only confirmed once paid. Check it afterwards in Il mio account > Ordini on carrefour.it.',
           ].join('\n')

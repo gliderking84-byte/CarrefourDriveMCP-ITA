@@ -29,6 +29,8 @@ let respond: (req: FetchRequest) => unknown;
 let landing = 'https://www.carrefour.it/checkout/begin?cart=1&rurl=2';
 const originalFetch = browserService.fetch.bind(browserService);
 const originalVisit = browserService.visit.bind(browserService);
+const originalFollow = browserService.followRedirect.bind(browserService);
+let paypalLanding: string | null = null;
 
 const ADDRESS = {
   customerAddressUUID: 'addr-1',
@@ -98,11 +100,16 @@ before(() => {
     visits.push(url);
     return { status: 200, finalUrl: landing };
   };
+  browserService.followRedirect = async () => {
+    if (!paypalLanding) throw new Error('timeout');
+    return paypalLanding;
+  };
 });
 
 after(() => {
   browserService.fetch = originalFetch;
   browserService.visit = originalVisit;
+  browserService.followRedirect = originalFollow;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -242,6 +249,8 @@ test('place_order creates the order once and hands the payment page over', async
   assert.match(res.text, /Order 03070001 created/);
   assert.match(res.text, /PayOnline-Checkout/);
 
+  assert.doesNotMatch(res.text, /Payment link \(PayPal/, 'no PayPal link when the redirect cannot be followed');
+
   // A second call must not create a second order.
   const again = await run(c, 'place_order', { confirm: true });
   assert.equal(again.isError, true);
@@ -290,4 +299,19 @@ test('prepare_checkout for pickup needs the store CAP and city', async () => {
   assert.equal(res.isError, true);
   assert.match(res.text, /store_cap and store_city/);
   assert.equal(calls.some((r) => step(r) === 'TimeSlotApi-ReserveTimeSlot'), false);
+});
+
+test('place_order hands over the PayPal link when carrefour.it redirects there', async () => {
+  paypalLanding = 'https://www.paypal.com/checkoutnow?token=EC-TEST123';
+  try {
+    const c = await client();
+    assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+    const res = await run(c, 'place_order', { confirm: true });
+    assert.equal(res.isError, false, res.text);
+    const links = [...res.text.matchAll(/https?:\/\/\S+/g)].map((m) => m[0]);
+    assert.equal(links[0], paypalLanding, 'the PayPal link comes first');
+    assert.match(res.text, /Payment link \(PayPal/);
+  } finally {
+    paypalLanding = null;
+  }
 });
