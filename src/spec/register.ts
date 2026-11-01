@@ -7,7 +7,7 @@ import { extract, sfccError } from './extract.js';
 import { httpService, redactUrl } from '../services/http.service.js';
 import { NO_SESSION_MESSAGE } from '../services/session.service.js';
 import { getCsrfToken } from '../services/auth.service.js';
-import { ensureSignedIn } from '../services/relogin.service.js';
+import { ensureSignedIn, lastReloginNote } from '../services/relogin.service.js';
 import { logger } from '../utils/logger.js';
 
 const MAX_RESPONSE_CHARS = parseInt(process.env.CARREFOUR_MAX_RESPONSE_CHARS || '60000', 10);
@@ -36,9 +36,10 @@ export async function executeSpec(spec: ToolSpec, args: Record<string, unknown>)
     // re-login on, a lost session is rebuilt here before the call goes out.
     if (spec.requires_auth) {
       const state = await ensureSignedIn();
-      if (state === 'none') return text(NO_SESSION_MESSAGE, true);
+      const note = lastReloginNote() ? `${lastReloginNote()}\n\n` : '';
+      if (state === 'none') return text(`${note}${NO_SESSION_MESSAGE}`, true);
       if (state === 'guest') {
-        return text(`carrefour.it no longer sees you as signed in, so ${spec.name} was not sent.\n\n${NO_SESSION_MESSAGE}`, true);
+        return text(`carrefour.it no longer sees you as signed in, so ${spec.name} was not sent.\n\n${note}${NO_SESSION_MESSAGE}`, true);
       }
     }
 

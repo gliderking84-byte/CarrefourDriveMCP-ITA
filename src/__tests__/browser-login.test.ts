@@ -51,3 +51,10 @@ test('the login is over only once the window is back on the storefront', async (
   assert.equal(loggedIn(tab('https://www.carrefour.it/')), true);
   assert.equal(loggedIn([{ type: 'service_worker', url: 'https://www.carrefour.it/sw.js' }]), false);
 });
+
+test('a stuck window is reported without its query string', async () => {
+  const { stopPoint } = await import('../services/browser-login.js');
+  assert.equal(stopPoint('https://accounts.google.com/v3/signin/identifier?client_id=x&state=secret'), 'accounts.google.com/v3/signin/identifier');
+  assert.equal(stopPoint('about:blank'), 'about:blank');
+  assert.equal(stopPoint('not a url'), 'an unknown page');
+});

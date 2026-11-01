@@ -66,6 +66,14 @@ export function findLoginBrowser(
   return loginBrowserCandidates(platform, env).find((b) => exists(b.path)) ?? null;
 }
 
+/**
+ * Chrome's sandbox needs kernel features an unprivileged container lacks; the
+ * Docker image sets CARREFOUR_LOGIN_NO_SANDBOX=1. Never set it on a desktop.
+ */
+function sandboxFlags(): string[] {
+  return process.env.CARREFOUR_LOGIN_NO_SANDBOX === '1' ? ['--no-sandbox'] : [];
+}
+
 function playwrightChromium(): LoginBrowser {
   const { chromium } = require('playwright') as typeof import('playwright');
   return { path: chromium.executablePath(), label: 'Chrome for Testing (Playwright)' };
@@ -197,6 +205,7 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
       `--remote-debugging-port=${port}`,
       '--no-first-run',
       '--no-default-browser-check',
+      ...sandboxFlags(),
       ...(opts.headless ? ['--headless=new'] : []),
       startUrl,
     ],
@@ -214,6 +223,7 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
   });
 
   let signedIn = false;
+  let lastUrl = '';
   const deadline = Date.now() + waitMs;
   try {
     while (Date.now() < deadline) {
@@ -228,6 +238,7 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
         continue;
       }
       if (tabs.length === 0) break;
+      lastUrl = tabs.find((tab) => tab.type === 'page')?.url ?? lastUrl;
       if (loggedIn(tabs)) {
         signedIn = true;
         break;
@@ -236,7 +247,8 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
 
     if (!signedIn) {
       return (
-        'The login did not complete: the window was closed, or never left the login page. Run the tool ' +
+        'The login did not complete: the window was closed, or never left the login page' +
+        `${lastUrl ? ` (it stopped at ${stopPoint(lastUrl)})` : ''}. Run the tool ` +
         'again, and leave the window open once you are signed in — closing it discards the session.'
       );
     }
@@ -277,6 +289,16 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
     'Signed in. The session is stored and kept alive while the server runs; after a long idle ' +
     'period carrefour.it expires it and you will have to sign in again.'
   );
+}
+
+/** Where a login window got stuck, without the query string (it may carry OAuth state). */
+export function stopPoint(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.host ? `${u.host}${u.pathname}` : u.protocol === 'about:' ? url.split('?')[0] : 'an unknown page';
+  } catch {
+    return 'an unknown page';
+  }
 }
 
 export interface LoginState {
@@ -348,7 +370,7 @@ export function openInUserBrowser(url: string): { opened: boolean; browser: stri
   const dir = dataPath('login-profile');
   mkdirSync(dir, { recursive: true });
   try {
-    const child = spawn(browser.path, [`--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', url], {
+    const child = spawn(browser.path, [`--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', ...sandboxFlags(), url], {
       stdio: 'ignore',
       detached: true,
     });

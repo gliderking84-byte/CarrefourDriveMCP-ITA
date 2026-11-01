@@ -154,6 +154,7 @@ test('with Google re-login on, a guest session is rebuilt before the call goes o
   relogin.run = async () => {
     attempts += 1;
     signedIn = true;
+    return 'Signed in.';
   };
   try {
     sessionService.importCookies('dwsid=abc');
@@ -179,6 +180,7 @@ test('a failed Google re-login is reported, and not retried at once', async () =
   let attempts = 0;
   relogin.run = async () => {
     attempts += 1;
+    return 'The login did not complete: the window was closed, or never left the login page (it stopped at accounts.google.com/v3/signin/identifier).';
   };
   try {
     sessionService.importCookies('dwsid=abc');
@@ -189,6 +191,7 @@ test('a failed Google re-login is reported, and not retried at once', async () =
     assert.equal(first.isError, true);
     assert.equal(second.isError, true);
     assert.equal(attempts, 1, 'a dead Google session is not hammered');
+    assert.match(first.content[0].text, /stopped at accounts\.google\.com\/v3\/signin\/identifier/);
   } finally {
     relogin.run = originalRun;
     delete process.env.CARREFOUR_GOOGLE_RELOGIN;
@@ -202,6 +205,7 @@ test('Google re-login stays off unless enabled', async () => {
   let attempts = 0;
   relogin.run = async () => {
     attempts += 1;
+    return '';
   };
   try {
     respond = () => json({});

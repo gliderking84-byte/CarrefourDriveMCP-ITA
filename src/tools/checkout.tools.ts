@@ -388,7 +388,9 @@ export function registerCheckoutTools(server: McpServer): void {
             `Order ${orderNumber} created on carrefour.it — total ${String(placed.total)}, ${placed.address}, ${placed.timeslot}.`,
             '',
             window.opened
-              ? `The payment page is open in ${window.browser}. Complete the payment there (PayPal sign-in and checks).`
+              ? process.env.CARREFOUR_DESK_URL
+                ? `The payment page is open on the server's screen (${process.env.CARREFOUR_DESK_URL}). Pay there, or open this link:`
+                : `The payment page is open in ${window.browser}. Complete the payment there (PayPal sign-in and checks).`
               : `Could not open a browser (${window.error}). Open this link to pay:`,
             redirectUrl,
             '',
