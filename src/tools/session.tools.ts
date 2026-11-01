@@ -2,7 +2,8 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { sessionService, NO_SESSION_MESSAGE } from '../services/session.service.js';
 import { forgetLoginState, isLoggedIn } from '../services/auth.service.js';
-import { isPlaywrightAvailable, loginState, startBrowserLogin } from '../services/browser-login.js';
+import { GOOGLE_LOGIN_URL, isPlaywrightAvailable, loginState, startBrowserLogin } from '../services/browser-login.js';
+import { googleReloginEnabled } from '../services/relogin.service.js';
 import { browserService } from '../services/browser.service.js';
 import { dataDir, dataPath } from '../utils/paths.js';
 
@@ -73,6 +74,7 @@ export function registerSessionTools(server: McpServer): void {
         `File: ${status.sessionFile}\nBrowser profile: ${browser.profile} (${browser.running ? 'running' : 'stopped'})` +
         `\nData directory: ${dataDir()}` +
         `\nHTML debug: ${process.env.CARREFOUR_DEBUG_HTML ? `on, pages saved to ${dataPath('debug')}` : 'off (set CARREFOUR_DEBUG_HTML=1)'}` +
+        `\nGoogle re-login: ${googleReloginEnabled() ? 'on — an expired session is rebuilt through "Accedi con Google"' : 'off (set CARREFOUR_GOOGLE_RELOGIN=1)'}` +
         loginStateLine();
 
       if (verify) {
@@ -105,12 +107,19 @@ export function registerSessionTools(server: McpServer): void {
       'carrefour_browser_login',
       'Opens a browser window on carrefour.it so you can sign in. Solve the captcha and sign in; ' +
         'leave the window open — it closes by itself once the session is captured. ' +
+        'With method="google" the window opens on "Accedi con Google" instead: sign in to Google once, and with ' +
+        'CARREFOUR_GOOGLE_RELOGIN=1 the server can later sign in again by itself. ' +
         'Returns after at most ~45 s even if you are still signing in: the login then completes in the ' +
         'background, and carrefour_session_status reports it. ' +
         'The login cannot be automated: Cloudflare Turnstile refuses to validate in a driven browser.',
-      {},
-      async (_args, extra) => {
-        const login = startBrowserLogin({});
+      {
+        method: z
+          .enum(['password', 'google'])
+          .optional()
+          .describe("'password' (email, password and captcha; default) or 'google' (Accedi con Google)."),
+      },
+      async ({ method }, extra) => {
+        const login = startBrowserLogin(method === 'google' ? { startUrl: GOOGLE_LOGIN_URL } : {});
         const progressToken = extra._meta?.progressToken;
 
         // Progress notifications keep clients that reset their timeout on progress from giving up.

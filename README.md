@@ -134,10 +134,39 @@ that first and asks you to sign in again.
 
 | Session tool | What it does |
 | --- | --- |
-| `carrefour_browser_login` | open a window to sign in |
+| `carrefour_browser_login` | open a window to sign in (`method: "google"` opens "Accedi con Google") |
 | `carrefour_session_status` | stored cookies, browser profile; `verify: true` asks the site whether you are signed in |
 | `carrefour_set_cookies` | import cookies manually (header, JSON map, or JSON array) |
 | `carrefour_clear_session` | wipe the local session |
+
+### Staying signed in with Google
+
+carrefour.it also signs you in with **"Accedi con Google"**, which has no captcha
+of its own. Once you are signed in to Google in the login profile, the server can
+sign in to carrefour.it again **by itself** whenever the session expires:
+
+1. Run `carrefour_browser_login` with `method: "google"` and sign in to Google in
+   the window (once, password and 2-step verification included).
+2. Set `CARREFOUR_GOOGLE_RELOGIN=1`.
+
+From then on, when a tool finds no session or a guest one, the server opens the
+Google button's URL (`…/Login-OAuthLogin?oauthProvider=Google…`) in the login
+profile. Google answers without a password, the window lands back on
+carrefour.it, and the cookies are lifted as after a manual login — then the call
+goes on. This is the same un-automated window as the manual login, only started
+by the server; nothing is typed and no password is stored.
+
+- If Google wants you again (expired Google session, new-device check), the
+  attempt fails, the tool says so, and you sign in once by hand. A failed attempt
+  is not retried for 10 minutes.
+- `CARREFOUR_GOOGLE_RELOGIN_HEADLESS=1` runs the attempt without a visible window
+  (for a server without a desktop). Google may treat headless browsers with more
+  suspicion: if attempts fail, run it with a window (e.g. under Xvfb).
+- **The login profile now holds a Google session**, which reaches the whole
+  Google account (Gmail, Drive…). Keep the data directory private, on an
+  encrypted disk, and consider a Google account used only for the shopping. The
+  Google account must be the one linked to your carrefour.it account, or
+  Carrefour may create a new, empty one.
 
 ## Tool reference
 
@@ -338,6 +367,9 @@ See `.env.example`. Main variables:
 | `CARREFOUR_KEEPALIVE_MINUTES` | `20` | session keep-alive period; `0` disables |
 | `CARREFOUR_LOGIN_WAIT_MS` | `45000` | how long `carrefour_browser_login` waits before returning |
 | `CARREFOUR_LOGIN_BROWSER` | first installed Chrome / Edge / Brave / Chromium | browser executable for the login window |
+| `CARREFOUR_GOOGLE_RELOGIN` | off | `1`: sign in again through "Accedi con Google" when the session is lost |
+| `CARREFOUR_GOOGLE_RELOGIN_HEADLESS` | off | `1`: run that re-login without a visible window |
+| `CARREFOUR_GOOGLE_RELOGIN_TIMEOUT_MS` | `60000` | how long one Google re-login may take |
 | `CARREFOUR_NAV_TIMEOUT_MS` | `60000` | browser navigation timeout |
 | `CARREFOUR_USER_AGENT` | stock Chrome UA | UA of the transport browser |
 | `CARREFOUR_TOOLS_DIR` | `<project>/tools` | JSON tool definitions directory |

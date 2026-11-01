@@ -263,6 +263,9 @@ export const NO_SESSION_MESSAGE = [
   '  3. Set CARREFOUR_COOKIES in the environment / .env file.',
   '  4. Set CARREFOUR_COOKIE_FILE to a JSON cookie export (Playwright/EditThisCookie format).',
   '',
+  'Signing in with "Accedi con Google" (carrefour_browser_login with method=google) and setting',
+  'CARREFOUR_GOOGLE_RELOGIN=1 lets the server sign in again on its own when the session expires.',
+  '',
   'The storefront session ends when Carrefour expires it; the server keeps it warm while it',
   'runs, but after a long idle period you will have to sign in again.',
 ].join('\n');

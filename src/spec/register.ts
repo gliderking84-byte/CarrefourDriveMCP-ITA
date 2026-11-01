@@ -5,8 +5,9 @@ import type { ToolSpec } from './types.js';
 import { loadToolSpecs, type LoadResult } from './loader.js';
 import { extract, sfccError } from './extract.js';
 import { httpService, redactUrl } from '../services/http.service.js';
-import { sessionService, NO_SESSION_MESSAGE } from '../services/session.service.js';
-import { getCsrfToken, isLoggedIn } from '../services/auth.service.js';
+import { NO_SESSION_MESSAGE } from '../services/session.service.js';
+import { getCsrfToken } from '../services/auth.service.js';
+import { ensureSignedIn } from '../services/relogin.service.js';
 import { logger } from '../utils/logger.js';
 
 const MAX_RESPONSE_CHARS = parseInt(process.env.CARREFOUR_MAX_RESPONSE_CHARS || '60000', 10);
@@ -29,15 +30,16 @@ function render(data: unknown): string {
 
 /** Execute one declarative tool. Exported so the smoke test can drive it directly. */
 export async function executeSpec(spec: ToolSpec, args: Record<string, unknown>): Promise<ToolResult> {
-  if (spec.requires_auth && !sessionService.hasSession()) {
-    return text(NO_SESSION_MESSAGE, true);
-  }
-
   try {
     // SFCC never answers 401: an expired session is silently a guest one, which
-    // would show an empty cart or take a write into an anonymous one.
-    if (spec.requires_auth && (await isLoggedIn()) === false) {
-      return text(`carrefour.it no longer sees you as signed in, so ${spec.name} was not sent.\n\n${NO_SESSION_MESSAGE}`, true);
+    // would show an empty cart or take a write into an anonymous one. With Google
+    // re-login on, a lost session is rebuilt here before the call goes out.
+    if (spec.requires_auth) {
+      const state = await ensureSignedIn();
+      if (state === 'none') return text(NO_SESSION_MESSAGE, true);
+      if (state === 'guest') {
+        return text(`carrefour.it no longer sees you as signed in, so ${spec.name} was not sent.\n\n${NO_SESSION_MESSAGE}`, true);
+      }
     }
 
     // The token is a reserved argument: templates read it as {"$param": "csrf_token"}.
