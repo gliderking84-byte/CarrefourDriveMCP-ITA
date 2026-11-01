@@ -22,7 +22,8 @@
     "verify": "npm run build && node --test 'dist/__tests__/*.test.js' && node scripts/smoke.mjs",
     "postinstall": "playwright install chromium",
     "prepare": "tsc",
-    "prepublishOnly": "npm test"
+    "prepublishOnly": "npm test",
+    "probe": "npm run build && node scripts/cloudflare-probe.mjs"
   },
   "keywords": [
     "mcp",

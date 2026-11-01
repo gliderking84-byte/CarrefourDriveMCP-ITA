@@ -296,6 +296,34 @@ The engine (`src/spec/`):
 Adding an endpoint = dropping a new JSON file into `tools/`, plus an extractor
 if the site answers in HTML.
 
+## Run it on another machine (VPS, Docker)
+
+The server needs a machine that stays on, runs Chromium, and that carrefour.it
+(behind Cloudflare) does not block. A home connection is known to work; a
+datacenter IP may be challenged. **Test a candidate machine before deploying:**
+
+```sh
+# on the candidate machine, with Docker
+git clone https://github.com/gliderking84-byte/carrefourdrivemcp-ita.git && cd carrefourdrivemcp-ita
+docker build -t carrefour-it-mcp .
+docker run --rm carrefour-it-mcp scripts/cloudflare-probe.mjs
+```
+
+`scripts/cloudflare-probe.mjs` (also `npm run probe` without Docker) drives the
+server's own transport — headless Chromium, its user agent, requests issued from
+inside a carrefour.it page — against public pages only, with a throwaway profile
+and no account. It loads a page, repeats the search XHR (Cloudflare often
+challenges after a few requests) and fetches a category grid, then prints
+`VERDICT: PASS` (exit 0) or `VERDICT: BLOCKED` (exit 1). It also prints the
+machine's public IP, looked up through api.ipify.org.
+
+The image runs the MCP server by default (stdio, as an unprivileged user), with
+sessions and browser profiles in the `/data` volume — keep that volume private:
+
+```sh
+docker run --rm -i -v carrefour-data:/data carrefour-it-mcp
+```
+
 ## Configuration
 
 See `.env.example`. Main variables:
