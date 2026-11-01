@@ -1,0 +1,48 @@
+# The HTTP server on a home machine, published with Tailscale Funnel:
+# a stable https://<host>.<tailnet>.ts.net address, no domain, no port opened
+# on the router. Tailscale runs in its own container; the server shares its
+# network and listens on 127.0.0.1 only, so Funnel is the only way in.
+#
+# 1. In the Tailscale admin console (login.tailscale.com/admin):
+#    - DNS: turn on MagicDNS and HTTPS Certificates; note your tailnet name
+#    - Access controls: allow Funnel (the policy needs a "funnel" nodeAttr)
+#    - Settings > Keys: generate an auth key -> TS_AUTHKEY
+# 2. In .env: TS_AUTHKEY, TS_HOSTNAME (e.g. carrefour-mcp),
+#    PUBLIC_URL=https://<TS_HOSTNAME>.<tailnet>.ts.net, MCP_OWNER_PASSPHRASE
+# 3. docker compose -f docker-compose.tailscale.yml up -d
+#
+# Claude's connector URL is then PUBLIC_URL + /mcp, and the desk PUBLIC_URL + /desk.
+
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: ${TS_HOSTNAME:-carrefour-mcp}
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY}
+      TS_HOSTNAME: ${TS_HOSTNAME:-carrefour-mcp}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./docker/tailscale-serve.json:/config/serve.json:ro
+
+  carrefour:
+    build: .
+    image: carrefour-it-mcp
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MCP_TRANSPORT: http
+      HOST: 127.0.0.1 # reachable only inside the shared network, i.e. through Tailscale
+      PORT: 3000
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    volumes:
+      - carrefour-data:/data
+    shm_size: 1gb # Chromium needs more shared memory than Docker's 64 MB default
+
+volumes:
+  tailscale-state:
+  carrefour-data:

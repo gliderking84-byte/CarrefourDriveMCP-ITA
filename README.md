@@ -369,6 +369,29 @@ same variables.
 | `/desk` | the server's screen in your browser (noVNC), behind the same passphrase |
 | `/health` | liveness, no auth |
 
+#### Or with Tailscale Funnel (no domain needed)
+
+On a home machine, `docker-compose.tailscale.yml` publishes the server at a
+stable `https://<name>.<tailnet>.ts.net` address through
+[Tailscale Funnel](https://tailscale.com/kb/1223/funnel), with no domain and no
+port opened on the router. Tailscale runs in its own container; the server
+shares its network and listens on 127.0.0.1 only.
+
+1. In the [Tailscale admin console](https://login.tailscale.com/admin):
+   - **DNS**: turn on MagicDNS and HTTPS Certificates, and note your tailnet name
+     (`something.ts.net`);
+   - **Access controls**: make sure the policy lets this machine use Funnel
+     (a `nodeAttrs` entry with `"attr": ["funnel"]`);
+   - **Settings → Keys**: generate an auth key.
+2. In `.env`: `TS_AUTHKEY`, `TS_HOSTNAME` (e.g. `carrefour-mcp`),
+   `PUBLIC_URL=https://carrefour-mcp.<tailnet>.ts.net`, `MCP_OWNER_PASSPHRASE`.
+3. `docker compose -f docker-compose.tailscale.yml up -d`.
+4. Once the machine shows up in the admin console, **disable key expiry** for it,
+   so it does not drop off the tailnet after a few months.
+
+The serve configuration is `docker/tailscale-serve.json` (HTTPS on 443, proxied
+to the server, Funnel on).
+
 ### 3. Connect Claude
 
 claude.ai → Settings → Connectors → **Add custom connector** →
