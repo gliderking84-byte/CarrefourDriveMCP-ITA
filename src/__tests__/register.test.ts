@@ -18,6 +18,7 @@ const { loadToolSpecs } = await import('../spec/loader.js');
 const { browserService } = await import('../services/browser.service.js');
 const { sessionService } = await import('../services/session.service.js');
 const { forgetLoginState } = await import('../services/auth.service.js');
+const { relogin, resetRelogin } = await import('../services/relogin.service.js');
 
 const specs = new Map(loadToolSpecs().specs.map((s) => [s.name, s]));
 const calls: FetchRequest[] = [];
@@ -142,4 +143,73 @@ test('an SFCC error code in a 200 answer is reported as an error, with its hint'
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /refused add_to_cart: NO_SHIPPING_METHOD_SELECTED/);
   assert.match(result.content[0].text, /reserve_delivery_timeslot/);
+});
+
+test('with Google re-login on, a guest session is rebuilt before the call goes out', async () => {
+  process.env.CARREFOUR_GOOGLE_RELOGIN = '1';
+  resetRelogin();
+  const originalRun = relogin.run;
+  let signedIn = false;
+  let attempts = 0;
+  relogin.run = async () => {
+    attempts += 1;
+    signedIn = true;
+  };
+  try {
+    sessionService.importCookies('dwsid=abc');
+    respond = (req) => {
+      if (req.url.includes('Store-SelectionBar')) return selectionBar(signedIn);
+      return json({ action: 'SearchRouter-Suggestions', result: '' });
+    };
+    const result = await executeSpec(specs.get('get_cart')!, {});
+    assert.equal(attempts, 1);
+    assert.equal(result.isError, false, result.content[0].text);
+    assert.ok(calls.some((c) => c.url.includes('Minicart-Show')), 'the call went out after the re-login');
+  } finally {
+    relogin.run = originalRun;
+    delete process.env.CARREFOUR_GOOGLE_RELOGIN;
+    resetRelogin();
+  }
+});
+
+test('a failed Google re-login is reported, and not retried at once', async () => {
+  process.env.CARREFOUR_GOOGLE_RELOGIN = '1';
+  resetRelogin();
+  const originalRun = relogin.run;
+  let attempts = 0;
+  relogin.run = async () => {
+    attempts += 1;
+  };
+  try {
+    sessionService.importCookies('dwsid=abc');
+    respond = (req) => (req.url.includes('Store-SelectionBar') ? selectionBar(false) : json({}));
+    const first = await executeSpec(specs.get('get_cart')!, {});
+    forgetLoginState();
+    const second = await executeSpec(specs.get('get_cart')!, {});
+    assert.equal(first.isError, true);
+    assert.equal(second.isError, true);
+    assert.equal(attempts, 1, 'a dead Google session is not hammered');
+  } finally {
+    relogin.run = originalRun;
+    delete process.env.CARREFOUR_GOOGLE_RELOGIN;
+    resetRelogin();
+  }
+});
+
+test('Google re-login stays off unless enabled', async () => {
+  resetRelogin();
+  const originalRun = relogin.run;
+  let attempts = 0;
+  relogin.run = async () => {
+    attempts += 1;
+  };
+  try {
+    respond = () => json({});
+    const result = await executeSpec(specs.get('get_cart')!, {});
+    assert.equal(result.isError, true);
+    assert.equal(attempts, 0);
+    assert.equal(calls.length, 0);
+  } finally {
+    relogin.run = originalRun;
+  }
 });

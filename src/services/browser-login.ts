@@ -86,11 +86,24 @@ export function isPlaywrightAvailable(): boolean {
  * that step. A successful sign-in redirects away from `/login` (to `/account`).
  */
 const LOGIN_URL = `${CARREFOUR_ORIGIN}/login?type=b2c`;
+
+/**
+ * The "Accedi con Google" button. With a Google session alive in the login
+ * profile, Google answers straight away and the window lands back on
+ * carrefour.it signed in, with no password and no captcha.
+ */
+export const GOOGLE_LOGIN_URL =
+  `${CARREFOUR_ORIGIN}/on/demandware.store/Sites-carrefour-IT-Site/it_IT/Login-OAuthLogin` +
+  '?oauthProvider=Google&regbtn=0&isLoginFlow=true';
 const POLL_MS = 2000;
 
 export interface BrowserLoginOptions {
   waitMs?: number;
   browser?: LoginBrowser;
+  /** Where the window opens: the login form (default) or GOOGLE_LOGIN_URL. */
+  startUrl?: string;
+  /** No visible window — for the unattended Google re-login. */
+  headless?: boolean;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -121,13 +134,17 @@ async function openTabs(port: number): Promise<Array<{ type: string; url: string
   return (await response.json()) as Array<{ type: string; url: string }>;
 }
 
-function loggedIn(tabs: Array<{ type: string; url: string }>): boolean {
+/**
+ * A tab back on the storefront, past the login: leaving /login means the form
+ * succeeded, and the Google flow goes through Login-OAuthLogin and its callback
+ * (both `…/Login-…` controllers) before landing on the storefront.
+ */
+export function loggedIn(tabs: Array<{ type: string; url: string }>): boolean {
   return tabs.some((tab) => {
     if (tab.type !== 'page') return false;
     try {
       const url = new URL(tab.url);
-      // Account-Login answers with a redirect URL; leaving /login means it succeeded.
-      return url.origin === CARREFOUR_ORIGIN && !url.pathname.startsWith('/login');
+      return url.origin === CARREFOUR_ORIGIN && !url.pathname.startsWith('/login') && !url.pathname.includes('/Login-');
     } catch {
       return false;
     }
@@ -170,7 +187,8 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
   const dir = dataPath('login-profile');
   mkdirSync(dir, { recursive: true });
   const waitMs = opts.waitMs ?? 900_000;
-  logger.info('Opening the login window', { browser: browser.label, executable });
+  const startUrl = opts.startUrl ?? LOGIN_URL;
+  logger.info('Opening the login window', { browser: browser.label, executable, startUrl, headless: !!opts.headless });
 
   const child = spawn(
     executable,
@@ -179,7 +197,8 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
       `--remote-debugging-port=${port}`,
       '--no-first-run',
       '--no-default-browser-check',
-      LOGIN_URL,
+      ...(opts.headless ? ['--headless=new'] : []),
+      startUrl,
     ],
     { stdio: 'ignore', detached: true }
   );

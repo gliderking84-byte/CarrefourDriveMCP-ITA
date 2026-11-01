@@ -35,3 +35,19 @@ test('CARREFOUR_LOGIN_BROWSER wins over detection', () => {
     label: 'CARREFOUR_LOGIN_BROWSER',
   });
 });
+
+test('the login is over only once the window is back on the storefront', async () => {
+  const { loggedIn, GOOGLE_LOGIN_URL } = await import('../services/browser-login.js');
+  const tab = (url: string) => [{ type: 'page', url }];
+  assert.equal(loggedIn(tab('https://www.carrefour.it/login?type=b2c')), false);
+  assert.equal(loggedIn(tab(GOOGLE_LOGIN_URL)), false, 'the Google button URL is itself on carrefour.it');
+  assert.equal(
+    loggedIn(tab('https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT/Login-OAuthReentry?code=x')),
+    false,
+    'nor is the OAuth callback'
+  );
+  assert.equal(loggedIn(tab('https://accounts.google.com/o/oauth2/v2/auth?client_id=x')), false);
+  assert.equal(loggedIn(tab('https://www.carrefour.it/account?registration=false')), true);
+  assert.equal(loggedIn(tab('https://www.carrefour.it/')), true);
+  assert.equal(loggedIn([{ type: 'service_worker', url: 'https://www.carrefour.it/sw.js' }]), false);
+});
