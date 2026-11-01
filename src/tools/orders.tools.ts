@@ -178,7 +178,7 @@ async function findOrder(orderNumber?: string): Promise<OrderSummary> {
 const orderNumberParam = z
   .string()
   .optional()
-  .describe('order_number from get_orders (e.g. "03077335"). Omit for the most recent order.');
+  .describe('order_number from get_orders (e.g. "01234567"). Omit for the most recent order.');
 
 export function registerOrderTools(server: McpServer): void {
   server.tool(
