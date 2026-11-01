@@ -1,5 +1,5 @@
 import { NO_SESSION_MESSAGE } from './session.service.js';
-import { ensureSignedIn } from './relogin.service.js';
+import { ensureSignedIn, lastReloginNote } from './relogin.service.js';
 import { httpService } from './http.service.js';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
@@ -109,8 +109,9 @@ export function check(step: string, data: Json): Json {
 /** A signed-in session, rebuilt through Google first when that is enabled. */
 export async function requireSignedIn(): Promise<void> {
   const state = await ensureSignedIn();
-  if (state === 'none') throw new SfccError(NO_SESSION_MESSAGE);
+  const note = lastReloginNote() ? `${lastReloginNote()}\n\n` : '';
+  if (state === 'none') throw new SfccError(`${note}${NO_SESSION_MESSAGE}`);
   if (state === 'guest') {
-    throw new SfccError(`carrefour.it no longer sees you as signed in.\n\n${NO_SESSION_MESSAGE}`);
+    throw new SfccError(`carrefour.it no longer sees you as signed in.\n\n${note}${NO_SESSION_MESSAGE}`);
   }
 }

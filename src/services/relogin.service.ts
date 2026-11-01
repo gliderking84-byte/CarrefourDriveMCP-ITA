@@ -26,8 +26,9 @@ export function googleReloginEnabled(): boolean {
 
 /** The attempt itself; replaceable in tests. */
 export const relogin = {
-  async run(): Promise<void> {
-    await browserLogin({
+  /** Resolves to the login's outcome message. */
+  async run(): Promise<string> {
+    return browserLogin({
       startUrl: GOOGLE_LOGIN_URL,
       waitMs: ATTEMPT_MS,
       headless: process.env.CARREFOUR_GOOGLE_RELOGIN_HEADLESS === '1',
@@ -37,11 +38,21 @@ export const relogin = {
 
 let inFlight: Promise<boolean> | null = null;
 let lastFailure = 0;
+let lastNote = '';
+
+/**
+ * Why the last Google re-login failed, for the tool that gave up: usually that
+ * Google wants the user again, so they know to sign in once on the desk.
+ */
+export function lastReloginNote(): string {
+  return lastNote;
+}
 
 /** Exposed for tests. */
 export function resetRelogin(): void {
   inFlight = null;
   lastFailure = 0;
+  lastNote = '';
 }
 
 /**
@@ -56,14 +67,20 @@ export function tryGoogleRelogin(): Promise<boolean> {
   inFlight = (async () => {
     try {
       logger.info('carrefour.it session lost, signing in again with Google');
-      await relogin.run();
+      const outcome = await relogin.run();
       forgetLoginState();
       const ok = (await isLoggedIn({ fresh: true })) === true;
-      if (!ok) lastFailure = Date.now();
-      logger.info('Google re-login finished', { ok });
+      if (!ok) {
+        lastFailure = Date.now();
+        lastNote = `Signing in again with Google did not work: ${outcome} Google probably wants you again: sign in once with carrefour_browser_login method=google${process.env.CARREFOUR_DESK_URL ? ` on ${process.env.CARREFOUR_DESK_URL}` : ''}.`;
+      } else {
+        lastNote = '';
+      }
+      logger.info('Google re-login finished', { ok, outcome });
       return ok;
     } catch (error) {
       lastFailure = Date.now();
+      lastNote = `Signing in again with Google failed: ${(error as Error).message}`;
       logger.error('Google re-login failed', { error: String(error) });
       return false;
     } finally {

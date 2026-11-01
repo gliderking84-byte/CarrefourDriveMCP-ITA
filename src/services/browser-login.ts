@@ -223,6 +223,7 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
   });
 
   let signedIn = false;
+  let lastUrl = '';
   const deadline = Date.now() + waitMs;
   try {
     while (Date.now() < deadline) {
@@ -237,6 +238,7 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
         continue;
       }
       if (tabs.length === 0) break;
+      lastUrl = tabs.find((tab) => tab.type === 'page')?.url ?? lastUrl;
       if (loggedIn(tabs)) {
         signedIn = true;
         break;
@@ -245,7 +247,8 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
 
     if (!signedIn) {
       return (
-        'The login did not complete: the window was closed, or never left the login page. Run the tool ' +
+        'The login did not complete: the window was closed, or never left the login page' +
+        `${lastUrl ? ` (it stopped at ${stopPoint(lastUrl)})` : ''}. Run the tool ` +
         'again, and leave the window open once you are signed in — closing it discards the session.'
       );
     }
@@ -286,6 +289,16 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
     'Signed in. The session is stored and kept alive while the server runs; after a long idle ' +
     'period carrefour.it expires it and you will have to sign in again.'
   );
+}
+
+/** Where a login window got stuck, without the query string (it may carry OAuth state). */
+export function stopPoint(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.host ? `${u.host}${u.pathname}` : u.protocol === 'about:' ? url.split('?')[0] : 'an unknown page';
+  } catch {
+    return 'an unknown page';
+  }
 }
 
 export interface LoginState {
