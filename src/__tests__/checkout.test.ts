@@ -355,3 +355,37 @@ test('prepare_checkout reports what the cart page says when the checkout keeps b
   assert.match(res.text, /The cart page says: "Il prodotto Finocchi 1 kg non è disponibile per la fascia scelta"/);
   assert.equal(visits.filter((v) => v.includes('/checkout/begin')).length, 2, 'one retry only');
 });
+
+test('renew_payment_link follows the order\'s payment page to a new PayPal link', async () => {
+  const c = await client();
+  assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+  const placed = await run(c, 'place_order', { confirm: true });
+  assert.match(placed.text, /renew_payment_link/);
+  const page = /carrefour\.it payment page: (\S+?)\)/.exec(placed.text)![1];
+  assert.match(page, /orderNumber=03070001/);
+
+  paypalLanding = 'https://www.paypal.com/checkoutnow?token=EC-NEW';
+  try {
+    const res = await run(c, 'renew_payment_link', { order_number: '03070001' });
+    assert.equal(res.isError, false, res.text);
+    assert.match(res.text, /EC-NEW/);
+    assert.equal(calls.filter((r) => step(r) === 'payment').length, 1, 'no new order');
+  } finally {
+    paypalLanding = null;
+  }
+  // carrefour.it does not reach PayPal any more: cancelled or paid
+  const gone = await run(c, 'renew_payment_link', { order_number: '03070001' });
+  assert.equal(gone.isError, true);
+  assert.match(gone.text, /no longer sends order 03070001 to PayPal/);
+});
+
+test('renew_payment_link only accepts this order\'s carrefour.it payment page', async () => {
+  const c = await client();
+  const bad = await run(c, 'renew_payment_link', { order_number: '123', payment_page_url: 'https://evil.example/pay?orderNumber=123' });
+  assert.equal(bad.isError, true);
+  assert.match(bad.text, /must be the carrefour\.it payment page/);
+  const other = await run(c, 'renew_payment_link', { order_number: '123', payment_page_url: 'https://www.carrefour.it/x/PayOnline-Checkout?orderNumber=999' });
+  assert.equal(other.isError, true);
+  const unknown = await run(c, 'renew_payment_link', { order_number: '555' });
+  assert.match(unknown.text, /No payment page known for order 555/);
+});

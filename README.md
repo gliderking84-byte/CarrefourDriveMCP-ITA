@@ -230,6 +230,7 @@ the server fetches a CSRF token (`…/CSRF-Generate`) right before sending it.
 | `apply_coupon` 🔒✍️ | discount code (`…/CheckoutServices-AddCoupon`) |
 | `prepare_checkout` 🔒✍️ | reserves the slot, opens `/checkout/begin`, submits the address (`/checkout/shipping-submit`), validates it against the delivery CAP and sets the slot (`…/Checkout-UpdateTimeslot`); returns items, delivery cost and total. **Orders nothing.** Home delivery, or pickup in store (`shippingMethodId: pickup_in_store`, with the store's `cap` and `city` from `find_stores`; no address is submitted). |
 | `place_order` 🔒✍️ | **creates the order** (`/checkout/payment`) and opens the payment page in your browser |
+| `renew_payment_link` 🔒 | a **new PayPal link** for an unpaid order (old link expired or payment cancelled): reopens the order's carrefour.it payment page and follows it to PayPal. Creates no order; fails when carrefour.it no longer sends the order to PayPal (cancelled or already paid) |
 
 Ordering is a two-step, human-approved flow:
 
@@ -241,6 +242,9 @@ Ordering is a two-step, human-approved flow:
    hCaptcha, or your card's 3-D Secure) opens in your browser, on the login
    profile that holds your carrefour.it session. Strong customer authentication
    is a human step by design; the server never sees payment credentials.
+4. PayPal links are valid for 3 hours. If the link expired or the payment was
+   cancelled while the order is still open, `renew_payment_link` gives a new
+   one for the same order.
 
 Only PayPal (`MP_PAYPAL`) is supported so far: it is the only method captured.
 Drive is not supported yet.
