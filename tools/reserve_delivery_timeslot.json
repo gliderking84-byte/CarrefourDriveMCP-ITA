@@ -1,6 +1,6 @@
 {
   "name": "reserve_delivery_timeslot",
-  "description": "Reserves a delivery or pickup timeslot, which also selects the store and shipping method for the cart. The reservation lasts 45 minutes. Take timeslotId, timeslotStart, timeslotEnd and timeslotEco from get_delivery_timeslots.",
+  "description": "Reserves a delivery or pickup timeslot, which also selects the store and shipping method for the cart. The reservation lasts 45 minutes. Changing store or service can make some cart products unavailable: check get_cart afterwards (remove_unavailable_products clears them). Take timeslotId, timeslotStart, timeslotEnd and timeslotEco from get_delivery_timeslots.",
   "parameters": {
     "type": "object",
     "properties": {

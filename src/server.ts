@@ -5,6 +5,7 @@ import { registerSessionTools } from './tools/session.tools.js';
 import { registerCheckoutTools } from './tools/checkout.tools.js';
 import { registerListTools } from './tools/lists.tools.js';
 import { registerOrderTools } from './tools/orders.tools.js';
+import { registerCartTools } from './tools/cart.tools.js';
 import { logger } from './utils/logger.js';
 
 let loaded: LoadResult | null = null;
@@ -27,6 +28,7 @@ export function createServer(): { server: McpServer; toolCount: number } {
   registerCheckoutTools(server);
   registerListTools(server);
   registerOrderTools(server);
+  registerCartTools(server);
   const load = toolSpecs();
   registerSpecTools(server, load);
   return { server, toolCount: load.specs.length };

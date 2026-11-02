@@ -231,29 +231,69 @@ export function extractSuggestions(data: unknown): {
 
 // --- Cart ----------------------------------------------------------------------
 
-export function extractCart(html: string): {
+export interface UnavailableItem {
+  ean: string;
+  name: string;
+  brand?: string;
+  quantity?: number;
+  url?: string;
+}
+
+export interface CartSummary {
   item_count: number;
   total_products?: string;
   shipping?: string;
   notices: string[];
   items: Product[];
-} {
+  unavailable_items?: UnavailableItem[];
+}
+
+/**
+ * Products the cart holds but the selected store or service cannot supply: the
+ * minicart's "N Prodotti non disponibili" carousel, one `line-item-card
+ * item-unavailable` card each, with the quantity in data-product-quantity.
+ */
+export function extractUnavailable(html: string): UnavailableItem[] {
+  const out = new Map<string, UnavailableItem>();
+  for (const chunk of chunks(html, /<div\s+class="line-item-card item-unavailable/)) {
+    const product = parseProduct(chunk);
+    if (!product || out.has(product.ean)) continue;
+    const item: UnavailableItem = { ean: product.ean, name: product.name };
+    if (product.brand) item.brand = product.brand;
+    const quantity = Number(attr(chunk, 'data-product-quantity'));
+    if (Number.isFinite(quantity) && quantity > 0) item.quantity = quantity;
+    if (product.url) item.url = product.url;
+    out.set(product.ean, item);
+  }
+  return [...out.values()];
+}
+
+export function extractCart(html: string): CartSummary {
+  // Unavailable cards come first in the minicart; keep them out of the regular lines.
   const items = chunks(html, /<li\s+class="line-item-card/)
+    .map((chunk) => chunk.split(/<div\s+class="line-item-card item-unavailable/)[0])
     .map(parseProduct)
     .filter((p): p is Product => p !== null);
+  const unavailable = extractUnavailable(html);
 
   const total = html.match(/Totale PRODOTTI<\/p>\s*<p class="minicartsidebar-price">([\s\S]*?)<\/p>/)?.[1];
   const shipping = html.match(/<p class="address">([\s\S]*?)<\/p>/)?.[1];
   const notices = [...html.matchAll(/<div class="minimum-order-flag-container">([\s\S]*?)<\/div>/g)].map((m) =>
     textOf(m[1])
   );
+  if (unavailable.length) {
+    notices.push(
+      `${unavailable.length} product(s) not available at the selected store/service: they are not counted in the ` +
+        'total and block the checkout. Remove them with remove_unavailable_products, or find alternatives with search_products.'
+    );
+  }
 
-  const out: { item_count: number; total_products?: string; shipping?: string; notices: string[]; items: Product[] } =
-    {
-      item_count: items.reduce((sum, item) => sum + (item.quantity_in_cart ?? 1), 0),
-      notices,
-      items,
-    };
+  const out: CartSummary = {
+    item_count: items.reduce((sum, item) => sum + (item.quantity_in_cart ?? 1), 0),
+    notices,
+    items,
+  };
+  if (unavailable.length) out.unavailable_items = unavailable;
   if (total) out.total_products = textOf(total);
   if (shipping) out.shipping = textOf(shipping);
   return out;
