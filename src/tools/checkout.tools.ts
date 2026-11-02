@@ -270,6 +270,19 @@ export function registerCheckoutTools(server: McpServer): void {
         const shipmentUUID = (reservation.reservedTimeslot as { shipmentUUID?: string } | undefined)?.shipmentUUID;
         if (!shipmentUUID) throw new SfccError('The timeslot reservation did not return a shipment.');
 
+        // The reservation may have switched store or service: products that store cannot supply
+        // stay in the cart as "non disponibili" and make the checkout bounce back to /cart.
+        const unavailable = extractCart(
+          await sfccHtml('GET', `${SFCC_BASE}/Minicart-Show`, { query: { cents: 'false' } })
+        ).unavailable_items;
+        if (unavailable?.length) {
+          throw new SfccError(
+            `The timeslot is reserved, but ${unavailable.length} product(s) in the cart are not available at this ` +
+              `store/service: ${unavailable.map((u) => `${u.name} (${u.ean})`).join(', ')}. Tell the user, then remove ` +
+              'them with remove_unavailable_products (or pick alternatives with search_products) and call prepare_checkout again.'
+          );
+        }
+
         // 2. Open the checkout like the site does; it bounces to /cart when something is off.
         const begin = await browserService.visit(`${CARREFOUR_ORIGIN}/checkout/begin?cart=1&rurl=2`);
         const landed = new URL(begin.finalUrl);

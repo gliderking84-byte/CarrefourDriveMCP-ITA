@@ -161,6 +161,7 @@ test('prepare_checkout chains reservation, checkout, address and slot, and order
       'Store-SelectionBar',
       'Account-AddressBook',
       'TimeSlotApi-ReserveTimeSlot',
+      'Minicart-Show',
       'shipping-submit',
       'CheckoutShippingServices-ValidateShippingAddress',
       'Checkout-UpdateTimeslot',
@@ -204,6 +205,20 @@ test('prepare_checkout reports the checkout bouncing back to the cart', async ()
   assert.equal(res.isError, true);
   assert.match(res.text, /\/cart\?fromAddressMismatch=true/);
   assert.equal(calls.some((r) => step(r) === 'shipping-submit'), false);
+});
+
+test('prepare_checkout stops before the checkout when the new store cannot supply some products', async () => {
+  const q = (v: unknown) => JSON.stringify(v).replace(/"/g, '&quot;');
+  const cart =
+    `<div class="line-item-card item-unavailable"><div class="card" data-product-json="${q({ id: '111', name: 'Uova 6' })}" ` +
+    'data-product-quantity="2"></div></div>';
+  respond = (req) => (step(req) === 'Minicart-Show' ? cart : happy(req));
+  const c = await client();
+  const res = await run(c, 'prepare_checkout', SLOT);
+  assert.equal(res.isError, true);
+  assert.match(res.text, /1 product\(s\) in the cart are not available at this store\/service: Uova 6 \(111\)/);
+  assert.match(res.text, /remove_unavailable_products/);
+  assert.deepEqual(visits, [], 'the checkout is not opened');
 });
 
 test('prepare_checkout asks which address when the account has several', async () => {

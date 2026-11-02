@@ -21,6 +21,8 @@ const { forgetLoginState } = await import('../services/auth.service.js');
 const { relogin, resetRelogin } = await import('../services/relogin.service.js');
 
 const specs = new Map(loadToolSpecs().specs.map((s) => [s.name, s]));
+/** An authenticated read: any would do. */
+const SLOTS = { storeId: '0001', shipmentId: 'delivery', cap: '20121', city: 'Milano' };
 const calls: FetchRequest[] = [];
 let respond: (req: FetchRequest) => Partial<FetchResponse>;
 const originalFetch = browserService.fetch.bind(browserService);
@@ -101,14 +103,14 @@ test('a write is not sent when carrefour.it treats the session as a guest', asyn
 test('an authenticated read is refused too when the session has turned into a guest one', async () => {
   sessionService.importCookies('dwsid=abc');
   respond = (req) => (req.url.includes('Store-SelectionBar') ? selectionBar(false) : json({}));
-  const result = await executeSpec(specs.get('get_cart')!, {});
+  const result = await executeSpec(specs.get('get_delivery_timeslots')!, SLOTS);
   assert.equal(result.isError, true);
-  assert.equal(calls.length, 1, 'the guest cart must not be fetched');
+  assert.equal(calls.length, 1, 'nothing may be fetched for a guest');
 });
 
 test('an authenticated tool without any stored session never touches the network', async () => {
   respond = () => json({});
-  const result = await executeSpec(specs.get('get_cart')!, {});
+  const result = await executeSpec(specs.get('get_delivery_timeslots')!, SLOTS);
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /No Carrefour session available/);
   assert.equal(calls.length, 0);
@@ -162,10 +164,10 @@ test('with Google re-login on, a guest session is rebuilt before the call goes o
       if (req.url.includes('Store-SelectionBar')) return selectionBar(signedIn);
       return json({ action: 'SearchRouter-Suggestions', result: '' });
     };
-    const result = await executeSpec(specs.get('get_cart')!, {});
+    const result = await executeSpec(specs.get('get_delivery_timeslots')!, SLOTS);
     assert.equal(attempts, 1);
     assert.equal(result.isError, false, result.content[0].text);
-    assert.ok(calls.some((c) => c.url.includes('Minicart-Show')), 'the call went out after the re-login');
+    assert.ok(calls.some((c) => c.url.includes('TimeSlotApi-GetTimeSlots')), 'the call went out after the re-login');
   } finally {
     relogin.run = originalRun;
     delete process.env.CARREFOUR_GOOGLE_RELOGIN;
@@ -185,9 +187,9 @@ test('a failed Google re-login is reported, and not retried at once', async () =
   try {
     sessionService.importCookies('dwsid=abc');
     respond = (req) => (req.url.includes('Store-SelectionBar') ? selectionBar(false) : json({}));
-    const first = await executeSpec(specs.get('get_cart')!, {});
+    const first = await executeSpec(specs.get('get_delivery_timeslots')!, SLOTS);
     forgetLoginState();
-    const second = await executeSpec(specs.get('get_cart')!, {});
+    const second = await executeSpec(specs.get('get_delivery_timeslots')!, SLOTS);
     assert.equal(first.isError, true);
     assert.equal(second.isError, true);
     assert.equal(attempts, 1, 'a dead Google session is not hammered');
@@ -209,7 +211,7 @@ test('Google re-login stays off unless enabled', async () => {
   };
   try {
     respond = () => json({});
-    const result = await executeSpec(specs.get('get_cart')!, {});
+    const result = await executeSpec(specs.get('get_delivery_timeslots')!, SLOTS);
     assert.equal(result.isError, true);
     assert.equal(attempts, 0);
     assert.equal(calls.length, 0);

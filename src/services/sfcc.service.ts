@@ -99,10 +99,21 @@ export async function sfccHtml(
   return html;
 }
 
+export const MISSING_DELIVERY =
+  'No service and CAP are set for this cart, so carrefour.it cannot add products (NO_SHIPPING_METHOD_SELECTED) ' +
+  'nor tell which are available. Ask the user for their CAP (or address) and whether they want home delivery ' +
+  'or pickup, then: find_stores -> get_delivery_timeslots -> reserve_delivery_timeslot.';
+
+/** What to do about an SFCC error code, when there is something to do. */
+const CODE_HINTS: Record<string, string> = { NO_SHIPPING_METHOD_SELECTED: MISSING_DELIVERY };
+
 /** Throw the failure SFCC reported in `data` for `step`, if any. */
 export function check(step: string, data: Json): Json {
   const failure = sfccError(data);
-  if (failure) throw new SfccError(`${step}: ${failure.message}`);
+  if (failure) {
+    const hint = failure.code ? CODE_HINTS[failure.code] : undefined;
+    throw new SfccError(`${step}: ${failure.message}${hint ? `\n\n${hint}` : ''}`);
+  }
   return data;
 }
 

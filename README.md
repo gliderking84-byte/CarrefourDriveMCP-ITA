@@ -10,8 +10,8 @@ A port of [maximeallanic/CarrefourDriveMCP](https://github.com/maximeallanic/Car
 carrefour.it is a Salesforce Commerce Cloud storefront, so every endpoint, the
 login and the response parsing were rewritten from real carrefour.it traffic.
 
-**32 tools.** 14 carrefour.it endpoints described as JSON and run by a generic
-executor, 14 tools written in code for the checkout, shopping lists, bulk cart
+**33 tools.** 13 carrefour.it endpoints described as JSON and run by a generic
+executor, 16 tools written in code for the cart view, checkout, shopping lists, bulk cart
 operations and past orders, and 4 session-management tools.
 
 ```
@@ -207,9 +207,17 @@ none — `add_to_cart` is refused with `NO_SHIPPING_METHOD_SELECTED`.
 
 | Tool | Endpoint | Required params |
 | --- | --- | --- |
-| `get_cart` 🔒 | GET …/Minicart-Show | — |
+| `get_cart` 🔒 | GET …/Minicart-Show + …/Store-ShowTimeslotReserved: lines, total, **unavailable products**, selected service/store/CAP/slot, and a notice when no CAP is set | — |
+| `remove_unavailable_products` 🔒✍️ | POST …/Cart-EmptyCartOutOfStock ("Elimina tutti" under *Prodotti non disponibili*) | — |
 | `add_to_cart` 🔒✍️ | POST /cart/add-product | `ean` (`quantity` defaults to 1) |
 | `update_cart_item_quantity` 🔒✍️ | GET /cart/updatequantity | `ean`, `decrease` |
+
+Products the selected store or service cannot supply (often after switching
+store) stay in the cart as *non disponibili*: `get_cart` lists them under
+`unavailable_items`, `prepare_checkout` stops before opening the checkout while
+any are left, and `remove_unavailable_products` clears them. With no service and
+CAP set (`NO_SHIPPING_METHOD_SELECTED`), every cart tool says to ask the user for
+a CAP and run `find_stores` → `get_delivery_timeslots` → `reserve_delivery_timeslot`.
 
 🔒 needs a signed-in session, checked before the call · ✍️ changes your account:
 the server fetches a CSRF token (`…/CSRF-Generate`) right before sending it.

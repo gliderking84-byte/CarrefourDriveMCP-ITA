@@ -61,7 +61,7 @@
       "subTotalValue"
     ],
     "hints": {
-      "NO_SHIPPING_METHOD_SELECTED": "No delivery method is selected in this session, so carrefour.it cannot price or reserve the product. Select one first: find_stores with your CAP, then get_delivery_timeslots and reserve_delivery_timeslot for the store and method you want; then retry."
+      "NO_SHIPPING_METHOD_SELECTED": "No delivery method or CAP is selected in this session, so carrefour.it cannot price or reserve the product. Ask the user for their CAP and whether they want home delivery or pickup, then select one: find_stores with the CAP, then get_delivery_timeslots and reserve_delivery_timeslot for the store and method you want; then retry."
     }
   }
 }
