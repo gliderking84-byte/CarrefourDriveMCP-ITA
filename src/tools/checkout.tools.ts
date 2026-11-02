@@ -131,6 +131,34 @@ let prepared: { at: number; total: unknown; address: string; timeslot: string } 
 /** carrefour.it payment page of each order placed here (orderNumber → URL), for renew_payment_link. */
 const paymentPages = new Map<string, string>();
 const PAYPAL_URL = /^https:\/\/([a-z0-9-]+\.)*paypal\.com\//i;
+/** Any https page outside carrefour.it: the payment provider's page (Market Pay, then PayPal). */
+const OFF_CARREFOUR = /^https:\/\/(?!(?:[a-z0-9-]+\.)*carrefour\.it(?:[/:?#]|$))[^\s]+/i;
+
+/**
+ * The carrefour.it payment page (…/PayOnline-Checkout?seu=…&orderNumber=…) only works with the
+ * customer's carrefour.it session: on a phone without it, it is a 404. The provider's hosted page
+ * it forwards to (in `seu`) carries its own token and works on any device.
+ */
+export function providerPageOf(redirectUrl: string): string {
+  try {
+    const seu = new URL(redirectUrl).searchParams.get('seu') ?? '';
+    return OFF_CARREFOUR.test(seu) ? seu : '';
+  } catch {
+    return '';
+  }
+}
+
+/** The link to hand the user: PayPal or the provider's page reached from the carrefour.it page, else `seu`. */
+async function paymentLinkFrom(page: string): Promise<{ url: string; paypal: boolean }> {
+  try {
+    const landed = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
+    return { url: landed, paypal: PAYPAL_URL.test(landed) };
+  } catch (error) {
+    logger.info('The payment page did not leave carrefour.it', { error: String(error) });
+  }
+  const seu = providerPageOf(page);
+  return { url: seu, paypal: PAYPAL_URL.test(seu) };
+}
 /** PayPal: "By default, the token is only valid for three hours." */
 const PAYPAL_LINK_HOURS = 3;
 
@@ -425,20 +453,20 @@ export function registerCheckoutTools(server: McpServer): void {
 
         // carrefour.it sends the payment page on to PayPal. The PayPal URL carries its own token, so
         // it works on any device and opens the PayPal app on a phone: hand that over when we can.
-        let paypalUrl = '';
-        try {
-          paypalUrl = await browserService.followRedirect(redirectUrl, PAYPAL_URL, PAYPAL_REDIRECT_TIMEOUT_MS);
-        } catch (error) {
-          logger.info('Could not reach the PayPal page from the payment link', { error: String(error) });
-        }
+        const pay = await paymentLinkFrom(redirectUrl);
+        const paypalUrl = pay.url; // PayPal, or the provider's page where the user picks PayPal
 
         const window = openInUserBrowser(paypalUrl || redirectUrl);
-        logger.info('Order placed, payment page handed to the user', { orderNumber, browser: window.browser, paypal: Boolean(paypalUrl) });
+        logger.info('Order placed, payment page handed to the user', { orderNumber, browser: window.browser, provider: Boolean(paypalUrl) });
         return text(
           [
             `Order ${orderNumber} created on carrefour.it — total ${String(placed.total)}, ${placed.address}, ${placed.timeslot}.`,
             '',
-            ...(paypalUrl ? ['Payment link (PayPal — opens the PayPal app on a phone, works on any device):', paypalUrl, ''] : []),
+            ...(paypalUrl
+              ? [pay.paypal
+                  ? 'Payment link (PayPal — opens the PayPal app on a phone, works on any device):'
+                  : 'Payment link (payment page with PayPal — works on any device, no carrefour.it sign-in needed):', paypalUrl, '']
+              : []),
             window.opened
               ? process.env.CARREFOUR_DESK_URL
                 ? `The payment page is open on the server's screen (${process.env.CARREFOUR_DESK_URL}). Pay there, or open this link:`
@@ -491,9 +519,9 @@ export function registerCheckoutTools(server: McpServer): void {
         if (!page) throw new SfccError(`No payment page known for order ${order_number}: pass payment_page_url as printed by place_order.`);
         let paypalUrl = '';
         try {
-          paypalUrl = await browserService.followRedirect(page, PAYPAL_URL, PAYPAL_REDIRECT_TIMEOUT_MS);
+          paypalUrl = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
         } catch (error) {
-          logger.info('renew_payment_link: no PayPal page', { order: order_number, error: String(error) });
+          logger.info('renew_payment_link: no payment page', { order: order_number, error: String(error) });
           throw new SfccError(
             `carrefour.it no longer sends order ${order_number} to PayPal: it was probably cancelled for missing payment ` +
               '(or it is already paid — check get_orders). Place a new order to pay.'
@@ -502,7 +530,7 @@ export function registerCheckoutTools(server: McpServer): void {
         paymentPages.set(order_number, page);
         return text(
           [
-            `New payment link for order ${order_number} (PayPal — opens the PayPal app on a phone, works on any device):`,
+            `New payment link for order ${order_number} (${PAYPAL_URL.test(paypalUrl) ? 'PayPal — opens the PayPal app on a phone' : 'payment page with PayPal'}, works on any device):`,
             paypalUrl,
             '',
             `It expires ${PAYPAL_LINK_HOURS} hours from now. The order is only confirmed once paid.`,

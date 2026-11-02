@@ -272,6 +272,9 @@ test('place_order creates the order once and hands the payment page over', async
   assert.match(res.text, /PayOnline-Checkout/);
 
   assert.doesNotMatch(res.text, /Payment link \(PayPal/, 'no PayPal link when the redirect cannot be followed');
+  // the provider page from `seu` comes first, never the carrefour.it page (a 404 without the session)
+  assert.equal([...res.text.matchAll(/https?:\/\/\S+/g)].map((m) => m[0])[0], 'https://hpp.example/checkout');
+  assert.match(res.text, /payment page with PayPal — works on any device/);
 
   // A second call must not create a second order.
   const again = await run(c, 'place_order', { confirm: true });
@@ -388,4 +391,12 @@ test('renew_payment_link only accepts this order\'s carrefour.it payment page', 
   assert.equal(other.isError, true);
   const unknown = await run(c, 'renew_payment_link', { order_number: '555' });
   assert.match(unknown.text, /No payment page known for order 555/);
+});
+
+test('providerPageOf reads the hosted payment page, never a carrefour.it one', async () => {
+  const { providerPageOf } = await import('../tools/checkout.tools.js');
+  assert.equal(providerPageOf('https://www.carrefour.it/x/PayOnline-Checkout?seu=https%3a%2f%2fhpp.example%2fcheckout%3ftoken%3dA&orderNumber=1'), 'https://hpp.example/checkout?token=A');
+  assert.equal(providerPageOf('https://www.carrefour.it/x/PayOnline-Checkout?seu=https%3a%2f%2fwww.carrefour.it%2fcart&orderNumber=1'), '');
+  assert.equal(providerPageOf('https://www.carrefour.it/x/PayOnline-Checkout?orderNumber=1'), '');
+  assert.equal(providerPageOf('not a url'), '');
 });

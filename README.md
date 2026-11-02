@@ -242,6 +242,9 @@ Ordering is a two-step, human-approved flow:
    hCaptcha, or your card's 3-D Secure) opens in your browser, on the login
    profile that holds your carrefour.it session. Strong customer authentication
    is a human step by design; the server never sees payment credentials.
+   The link handed over is the payment provider's page (or PayPal itself), never
+   the carrefour.it `PayOnline-Checkout` page: that one needs the carrefour.it
+   session and is a 404 on a phone that is not signed in.
 4. PayPal links are valid for 3 hours. If the link expired or the payment was
    cancelled while the order is still open, `renew_payment_link` gives a new
    one for the same order.
