@@ -2,10 +2,13 @@ import type { BuiltRequest } from '../spec/types.js';
 import { browserService, type FetchRequest } from './browser.service.js';
 import { logger } from '../utils/logger.js';
 
-const RATE_LIMIT_REQUESTS = parseInt(process.env.RATE_LIMIT_REQUESTS || '10', 10);
+// One order (slot, cart, checkout, payment) takes 15–25 requests to carrefour.it: with 10 a
+// minute the limiter alone made steps wait close to a minute and clients time out. 40 a minute,
+// with the jitter below, still paces requests like a person clicking through the site.
+const RATE_LIMIT_REQUESTS = parseInt(process.env.RATE_LIMIT_REQUESTS || '40', 10);
 const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10);
-const MIN_DELAY_MS = parseInt(process.env.MIN_DELAY_MS || '100', 10);
-const MAX_DELAY_MS = parseInt(process.env.MAX_DELAY_MS || '500', 10);
+const MIN_DELAY_MS = parseInt(process.env.MIN_DELAY_MS || '150', 10);
+const MAX_DELAY_MS = parseInt(process.env.MAX_DELAY_MS || '600', 10);
 
 /** CSRF tokens travel in the query string of some calls; keep them out of the logs. */
 export function redactUrl(url: string): string {
@@ -37,7 +40,7 @@ class HttpService {
     if (this.requestTimestamps.length >= RATE_LIMIT_REQUESTS) {
       const wait = RATE_LIMIT_WINDOW_MS - (now - this.requestTimestamps[0]);
       if (wait > 0) {
-        logger.info('Rate limit reached, waiting', { waitMs: wait });
+        logger.info('Rate limit reached, waiting', { waitMs: wait, limit: RATE_LIMIT_REQUESTS });
         await this.sleep(wait);
       }
     }

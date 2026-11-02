@@ -477,8 +477,8 @@ See `.env.example`. Main variables:
 | `CARREFOUR_USER_AGENT` | stock Chrome UA | UA of the transport browser |
 | `CARREFOUR_TOOLS_DIR` | `<project>/tools` | JSON tool definitions directory |
 | `CARREFOUR_MAX_RESPONSE_CHARS` | `60000` | truncation of large responses |
-| `RATE_LIMIT_REQUESTS` / `RATE_LIMIT_WINDOW_MS` | `10` / `60000` | rate-limit window |
-| `MIN_DELAY_MS` / `MAX_DELAY_MS` | `100` / `500` | jitter between requests |
+| `RATE_LIMIT_REQUESTS` / `RATE_LIMIT_WINDOW_MS` | `40` / `60000` | rate-limit window (one order is 15–25 requests: below ~30 the limiter makes steps wait up to a minute) |
+| `MIN_DELAY_MS` / `MAX_DELAY_MS` | `150` / `600` | jitter between requests |
 | `LOG_LEVEL`, `CARREFOUR_LOG_DIR` | `info`, `<data>` | winston logs (files + stderr, **never stdout**) |
 
 ## Verify the install
