@@ -4,14 +4,15 @@ import { CARREFOUR_ORIGIN, SFCC_BASE } from '../services/session.service.js';
 import { getCsrfToken } from '../services/auth.service.js';
 import { browserService } from '../services/browser.service.js';
 import { openInUserBrowser } from '../services/browser-login.js';
-import { SfccError, check, requireSignedIn, sfccHtml, sfccJson, type Json } from '../services/sfcc.service.js';
+import { SfccError, check, requireSignedIn, saveDebugPage, sfccHtml, sfccJson, type Json } from '../services/sfcc.service.js';
 import { extractCart, stripEnvelope, textOf } from '../spec/extract.js';
 import { logger } from '../utils/logger.js';
 
 // Where carrefour.it's cart page shows what blocks the checkout.
 const CART_ALERTS =
   '[role="alert"], .alert, .alert-danger, .alert-warning, .cart-error, .error-message, .invalid-feedback, ' +
-  '.minimum-order-flag-container, .unavailable, .not-available, .availability, .product-unavailable';
+  '.minimum-order-flag-container, .unavailable, .not-available, .product-unavailable, ' +
+  '[class*="error"], [class*="warning"], [class*="notice"], [class*="unavailable"], [class*="esaurit"], [class*="limit"]';
 const PAYPAL_REDIRECT_TIMEOUT_MS = parseInt(process.env.PAYPAL_REDIRECT_TIMEOUT_MS || '20000', 10);
 
 /**
@@ -290,6 +291,10 @@ export function registerCheckoutTools(server: McpServer): void {
         }
         if (!landed.pathname.startsWith('/checkout')) {
           const messages = await browserService.pageMessages(CARREFOUR_ORIGIN, CART_ALERTS);
+          if (process.env.CARREFOUR_DEBUG_HTML) {
+            const snap = await browserService.pageSnapshot(CARREFOUR_ORIGIN);
+            if (snap) saveDebugPage('cart-bounce', snap.html, snap.png);
+          }
           throw new SfccError(
             `carrefour.it refused to open the checkout and sent back to ${landed.pathname}${landed.search}. ` +
               (messages.length ? `The cart page says: ${messages.map((m) => `"${m}"`).join('; ')}. ` : '') +
