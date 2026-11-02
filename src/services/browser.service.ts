@@ -276,6 +276,50 @@ class BrowserService {
     }
   }
 
+  /**
+   * From the payment provider's hosted page (Market Pay, `#pay=EWALLET_PAYPAL` preselects PayPal) to
+   * PayPal's own page: press the provider's pay button in a throwaway tab and read where it lands
+   * (same tab or a popup). PayPal's URL carries its own token, works on any device and, on a phone
+   * with the PayPal app, can open the app. '' when the page has no such button or never reaches PayPal:
+   * the caller keeps the provider's page. Nothing is ticked or filled in, only the pay button pressed.
+   */
+  async payPalFromProvider(url: string, paypal: RegExp, timeoutMs = 25000): Promise<string> {
+    const context = await this.ensureContext();
+    const page = await context.newPage();
+    const popups: Page[] = [];
+    const onPage = (p: Page) => popups.push(p);
+    context.on('page', onPage);
+    const landed = (): string => [page, ...popups].map((p) => p.url()).find((u) => paypal.test(u)) ?? '';
+    const deadline = Date.now() + timeoutMs;
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs }).catch(() => undefined);
+      if (landed()) return landed();
+      await page.waitForLoadState('networkidle', { timeout: Math.min(8000, Math.max(0, deadline - Date.now())) }).catch(() => undefined);
+      const label = /^\s*(paga|pay|procedi|prosegui|continua|conferma|confirm|continue|paypal)\b|paypal/i;
+      const candidates = page
+        .locator('button, input[type=submit], input[type=button], a[role=button], [role=button], [id*=paypal i], [class*=paypal i]');
+      const seen: string[] = [];
+      const count = Math.min(await candidates.count().catch(() => 0), 60);
+      for (let i = 0; i < count && Date.now() < deadline; i++) {
+        const el = candidates.nth(i);
+        if (!(await el.isVisible().catch(() => false))) continue;
+        const name = ((await el.innerText().catch(() => '')) || (await el.getAttribute('value').catch(() => '')) || (await el.getAttribute('aria-label').catch(() => '')) || (await el.getAttribute('id').catch(() => '')) || '').trim();
+        seen.push(name.slice(0, 30));
+        if (!label.test(name)) continue;
+        await el.click({ timeout: 5000 }).catch(() => undefined);
+        const until = Math.min(deadline, Date.now() + 12000);
+        while (Date.now() < until && !landed()) await page.waitForTimeout(250);
+        if (landed()) return landed();
+      }
+      logger.info('The payment page has no button that leads to PayPal', { buttons: seen.filter(Boolean).slice(0, 10) });
+      return '';
+    } finally {
+      context.off('page', onPage);
+      // the popup is closed too: the PayPal token lives at PayPal, not in this tab
+      await Promise.all([page, ...popups].map((p) => p.close().catch(() => undefined)));
+    }
+  }
+
   /** Mirror the browser's cookies back into the jar so status/refresh can read them. */
   async syncCookies(): Promise<void> {
     try {

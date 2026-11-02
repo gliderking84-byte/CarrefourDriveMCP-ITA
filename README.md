@@ -245,6 +245,11 @@ Ordering is a two-step, human-approved flow:
    The link handed over is the payment provider's page (or PayPal itself), never
    the carrefour.it `PayOnline-Checkout` page: that one needs the carrefour.it
    session and is a 404 on a phone that is not signed in.
+   Market Pay's page (`selection.hpp…#pay=EWALLET_PAYPAL`, PayPal preselected)
+   still wants a "Paga" press before PayPal opens: the server presses it in a
+   throwaway tab and hands over PayPal's own `checkoutnow?token=…` page, which
+   opens the PayPal app on a phone that has it. Nothing is ticked or filled in;
+   if PayPal is not reached, the Market Pay page stays the link.
 4. PayPal links are valid for 3 hours. If the link expired or the payment was
    cancelled while the order is still open, `renew_payment_link` gives a new
    one for the same order.
