@@ -231,6 +231,9 @@ class BrowserService {
           for (const el of Array.from(document.querySelectorAll(selector))) {
             const box = (el as HTMLElement).getBoundingClientRect();
             const text = ((el as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim();
+            // quantity widgets and bare numbers are not messages ("Quantità 2")
+            if (/^(quantit[aà]|qty|quantity)?\s*[:x×]?\s*\d+([.,]\d+)?\s*(pz|kg|g)?$/i.test(text)) continue;
+            if (el.closest('input, select, button, option')) continue;
             if (text && box.width > 0 && box.height > 0 && text.length < 300) seen.add(text);
             if (seen.size >= max) break;
           }
@@ -240,6 +243,19 @@ class BrowserService {
       );
     } catch {
       return [];
+    }
+  }
+
+  /** HTML and a screenshot of the page parked for `origin` (for debugging a page we cannot read). */
+  async pageSnapshot(origin: string): Promise<{ html: string; png: Buffer | null } | null> {
+    const page = this.pages.get(origin);
+    if (!page || page.isClosed()) return null;
+    try {
+      const html = await page.content();
+      const png = await page.screenshot({ fullPage: true }).catch(() => null);
+      return { html, png };
+    } catch {
+      return null;
     }
   }
 

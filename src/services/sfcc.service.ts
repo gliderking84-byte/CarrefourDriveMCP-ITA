@@ -87,6 +87,26 @@ function dumpHtml(target: URL, html: string): void {
   }
 }
 
+/**
+ * With CARREFOUR_DEBUG_HTML set, save a page the browser is showing (HTML, tokens
+ * redacted, plus a screenshot) to <data>/debug. Returns the HTML file path.
+ */
+export function saveDebugPage(name: string, html: string, png?: Buffer | null): string | null {
+  if (!process.env.CARREFOUR_DEBUG_HTML) return null;
+  try {
+    const dir = dataPath('debug');
+    mkdirSync(dir, { recursive: true });
+    const base = join(dir, `${name.replace(/[^a-zA-Z0-9-]+/g, '_')}_${Date.now()}`);
+    writeFileSync(`${base}.html`, redactTokens(html), { mode: 0o600 });
+    if (png) writeFileSync(`${base}.png`, png, { mode: 0o600 });
+    logger.info('Page saved for debugging', { file: `${base}.html`, screenshot: png ? `${base}.png` : null });
+    return `${base}.html`;
+  } catch (error) {
+    logger.error('Could not save the page', { error: String(error) });
+    return null;
+  }
+}
+
 /** One SFCC call answering HTML: a fragment (default) or, with `page`, a whole page as a browser asks for it. */
 export async function sfccHtml(
   method: 'GET' | 'POST',
