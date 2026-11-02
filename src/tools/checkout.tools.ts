@@ -148,16 +148,33 @@ export function providerPageOf(redirectUrl: string): string {
   }
 }
 
-/** The link to hand the user: PayPal or the provider's page reached from the carrefour.it page, else `seu`. */
-async function paymentLinkFrom(page: string): Promise<{ url: string; paypal: boolean }> {
+/**
+ * The provider's page (Market Pay) asks the user to press "Paga" before PayPal opens: pressed here,
+ * in a throwaway tab, the user gets PayPal's own page straight away (and, on a phone, the PayPal app
+ * when it is installed). '' when it cannot be reached: the provider's page stays the link.
+ */
+async function payPalBehind(provider: string): Promise<string> {
+  if (!provider || PAYPAL_URL.test(provider)) return provider;
   try {
-    const landed = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
-    return { url: landed, paypal: PAYPAL_URL.test(landed) };
+    return await browserService.payPalFromProvider(provider, PAYPAL_URL, PAYPAL_REDIRECT_TIMEOUT_MS + 10000);
+  } catch (error) {
+    logger.info('PayPal not reached from the payment page', { error: String(error) });
+    return '';
+  }
+}
+
+/** The link to hand the user: PayPal (also behind the provider's page), else the provider's page, else `seu`. */
+async function paymentLinkFrom(page: string): Promise<{ url: string; paypal: boolean }> {
+  let provider = '';
+  try {
+    provider = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
   } catch (error) {
     logger.info('The payment page did not leave carrefour.it', { error: String(error) });
   }
-  const seu = providerPageOf(page);
-  return { url: seu, paypal: PAYPAL_URL.test(seu) };
+  if (!provider) provider = providerPageOf(page);
+  const paypal = await payPalBehind(provider);
+  if (paypal) return { url: paypal, paypal: true };
+  return { url: provider, paypal: false };
 }
 /** PayPal: "By default, the token is only valid for three hours." */
 const PAYPAL_LINK_HOURS = 3;
@@ -520,6 +537,7 @@ export function registerCheckoutTools(server: McpServer): void {
         let paypalUrl = '';
         try {
           paypalUrl = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
+          paypalUrl = (await payPalBehind(paypalUrl)) || paypalUrl;
         } catch (error) {
           logger.info('renew_payment_link: no payment page', { order: order_number, error: String(error) });
           throw new SfccError(

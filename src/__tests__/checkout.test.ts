@@ -31,6 +31,10 @@ const originalFetch = browserService.fetch.bind(browserService);
 const originalVisit = browserService.visit.bind(browserService);
 const originalFollow = browserService.followRedirect.bind(browserService);
 const originalMessages = browserService.pageMessages.bind(browserService);
+const originalPayPal = browserService.payPalFromProvider.bind(browserService);
+/** PayPal behind the provider's page ("Paga" pressed there); '' = not reached. */
+let paypalBehind = '';
+const pressed: string[] = [];
 let landings: string[] = [];
 let cartMessages: string[] = [];
 let paypalLanding: string | null = null;
@@ -104,6 +108,10 @@ before(() => {
     return { status: 200, finalUrl: landings.length ? landings.shift()! : landing };
   };
   browserService.pageMessages = async () => cartMessages;
+  browserService.payPalFromProvider = async (url: string) => {
+    pressed.push(url);
+    return paypalBehind;
+  };
   browserService.followRedirect = async () => {
     if (!paypalLanding) throw new Error('timeout');
     return paypalLanding;
@@ -115,11 +123,14 @@ after(() => {
   browserService.visit = originalVisit;
   browserService.followRedirect = originalFollow;
   browserService.pageMessages = originalMessages;
+  browserService.payPalFromProvider = originalPayPal;
   rmSync(dir, { recursive: true, force: true });
 });
 
 beforeEach(() => {
   calls.length = 0;
+  pressed.length = 0;
+  paypalBehind = '';
   visits.length = 0;
   respond = happy;
   landing = 'https://www.carrefour.it/checkout/begin?cart=1&rurl=2';
@@ -336,6 +347,37 @@ test('place_order hands over the PayPal link when carrefour.it redirects there',
     const links = [...res.text.matchAll(/https?:\/\/\S+/g)].map((m) => m[0]);
     assert.equal(links[0], paypalLanding, 'the PayPal link comes first');
     assert.match(res.text, /Payment link \(PayPal/);
+    assert.deepEqual(pressed, [], 'already on PayPal: nothing to press');
+  } finally {
+    paypalLanding = null;
+  }
+});
+
+test('place_order presses Paga on the provider page and hands over PayPal (the app on a phone)', async () => {
+  paypalLanding = 'https://hpp2.prod.mpg.market-pay.com/hppv22/selection.hpp?sessionId=S1#pay=EWALLET_PAYPAL';
+  paypalBehind = 'https://www.paypal.com/checkoutnow?token=EC-BEHIND';
+  try {
+    const c = await client();
+    assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+    const res = await run(c, 'place_order', { confirm: true });
+    assert.equal(res.isError, false, res.text);
+    assert.deepEqual(pressed, [paypalLanding], 'Paga pressed on the provider page, once');
+    assert.equal([...res.text.matchAll(/https?:\/\/\S+/g)].map((m) => m[0])[0], paypalBehind);
+    assert.match(res.text, /Payment link \(PayPal/);
+  } finally {
+    paypalLanding = null;
+  }
+});
+
+test('place_order keeps the provider page when PayPal is not reached behind it', async () => {
+  paypalLanding = 'https://hpp2.prod.mpg.market-pay.com/hppv22/selection.hpp?sessionId=S2#pay=EWALLET_PAYPAL';
+  try {
+    const c = await client();
+    assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+    const res = await run(c, 'place_order', { confirm: true });
+    assert.equal(res.isError, false, res.text);
+    assert.equal([...res.text.matchAll(/https?:\/\/\S+/g)].map((m) => m[0])[0], paypalLanding);
+    assert.match(res.text, /payment page with PayPal/);
   } finally {
     paypalLanding = null;
   }
