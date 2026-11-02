@@ -218,6 +218,32 @@ class BrowserService {
   }
 
   /**
+   * The visible messages on the page parked for `origin` (e.g. the alerts on
+   * /cart after the checkout bounced there), deduplicated, at most `max`.
+   */
+  async pageMessages(origin: string, selector: string, max = 5): Promise<string[]> {
+    const page = this.pages.get(origin);
+    if (!page || page.isClosed()) return [];
+    try {
+      return await page.evaluate(
+        ({ selector, max }) => {
+          const seen = new Set<string>();
+          for (const el of Array.from(document.querySelectorAll(selector))) {
+            const box = (el as HTMLElement).getBoundingClientRect();
+            const text = ((el as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim();
+            if (text && box.width > 0 && box.height > 0 && text.length < 300) seen.add(text);
+            if (seen.size >= max) break;
+          }
+          return [...seen];
+        },
+        { selector, max }
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Follow `url` in a throwaway tab of the signed-in browser until it lands on a
    * URL matching `until` (e.g. the PayPal page carrefour.it redirects to), and
    * return that URL. The parked pages are left alone. Throws on timeout.

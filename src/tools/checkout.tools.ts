@@ -8,6 +8,10 @@ import { SfccError, check, requireSignedIn, sfccHtml, sfccJson, type Json } from
 import { extractCart, stripEnvelope, textOf } from '../spec/extract.js';
 import { logger } from '../utils/logger.js';
 
+// Where carrefour.it's cart page shows what blocks the checkout.
+const CART_ALERTS =
+  '[role="alert"], .alert, .alert-danger, .alert-warning, .cart-error, .error-message, .invalid-feedback, ' +
+  '.minimum-order-flag-container, .unavailable, .not-available, .availability, .product-unavailable';
 const PAYPAL_REDIRECT_TIMEOUT_MS = parseInt(process.env.PAYPAL_REDIRECT_TIMEOUT_MS || '20000', 10);
 
 /**
@@ -273,11 +277,22 @@ export function registerCheckoutTools(server: McpServer): void {
         if (!shipmentUUID) throw new SfccError('The timeslot reservation did not return a shipment.');
 
         // 2. Open the checkout like the site does; it bounces to /cart when something is off.
-        const begin = await browserService.visit(`${CARREFOUR_ORIGIN}/checkout/begin?cart=1&rurl=2`);
-        const landed = new URL(begin.finalUrl);
+        //    The cart page recalculates the basket (changed prices, ended offers, a new slot): a
+        //    shopper would see it and press "Procedi" again, so we do the same, once. If it still
+        //    bounces, the messages shown on the cart page say why.
+        const beginUrl = `${CARREFOUR_ORIGIN}/checkout/begin?cart=1&rurl=2`;
+        let landed = new URL((await browserService.visit(beginUrl)).finalUrl);
         if (!landed.pathname.startsWith('/checkout')) {
+          if (landed.pathname.startsWith('/cart')) {
+            logger.info('Checkout bounced to the cart, retrying once after the cart page', { landed: landed.pathname + landed.search });
+            landed = new URL((await browserService.visit(beginUrl)).finalUrl);
+          }
+        }
+        if (!landed.pathname.startsWith('/checkout')) {
+          const messages = await browserService.pageMessages(CARREFOUR_ORIGIN, CART_ALERTS);
           throw new SfccError(
             `carrefour.it refused to open the checkout and sent back to ${landed.pathname}${landed.search}. ` +
+              (messages.length ? `The cart page says: ${messages.map((m) => `"${m}"`).join('; ')}. ` : '') +
               'Check the cart (minimum order, unavailable products) and that the delivery CAP matches the address.'
           );
         }
