@@ -30,6 +30,9 @@ let landing = 'https://www.carrefour.it/checkout/begin?cart=1&rurl=2';
 const originalFetch = browserService.fetch.bind(browserService);
 const originalVisit = browserService.visit.bind(browserService);
 const originalFollow = browserService.followRedirect.bind(browserService);
+const originalMessages = browserService.pageMessages.bind(browserService);
+let landings: string[] = [];
+let cartMessages: string[] = [];
 let paypalLanding: string | null = null;
 
 const ADDRESS = {
@@ -98,8 +101,9 @@ before(() => {
   };
   browserService.visit = async (url: string) => {
     visits.push(url);
-    return { status: 200, finalUrl: landing };
+    return { status: 200, finalUrl: landings.length ? landings.shift()! : landing };
   };
+  browserService.pageMessages = async () => cartMessages;
   browserService.followRedirect = async () => {
     if (!paypalLanding) throw new Error('timeout');
     return paypalLanding;
@@ -110,6 +114,7 @@ after(() => {
   browserService.fetch = originalFetch;
   browserService.visit = originalVisit;
   browserService.followRedirect = originalFollow;
+  browserService.pageMessages = originalMessages;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -118,6 +123,8 @@ beforeEach(() => {
   visits.length = 0;
   respond = happy;
   landing = 'https://www.carrefour.it/checkout/begin?cart=1&rurl=2';
+  landings = [];
+  cartMessages = [];
   forgetLoginState();
   resetPreparedCheckout();
   sessionService.clear();
@@ -314,4 +321,22 @@ test('place_order hands over the PayPal link when carrefour.it redirects there',
   } finally {
     paypalLanding = null;
   }
+});
+
+test('prepare_checkout retries once when the checkout bounces to the cart (recalculated basket)', async () => {
+  landings = ['https://www.carrefour.it/cart', 'https://www.carrefour.it/checkout/begin?cart=1&rurl=2'];
+  const c = await client();
+  const res = await run(c, 'prepare_checkout', SLOT);
+  assert.equal(res.isError, false, res.text);
+  assert.equal(visits.filter((v) => v.includes('/checkout/begin')).length, 2);
+});
+
+test('prepare_checkout reports what the cart page says when the checkout keeps bouncing', async () => {
+  landing = 'https://www.carrefour.it/cart';
+  cartMessages = ['Il prodotto Finocchi 1 kg non è disponibile per la fascia scelta'];
+  const c = await client();
+  const res = await run(c, 'prepare_checkout', SLOT);
+  assert.equal(res.isError, true);
+  assert.match(res.text, /The cart page says: "Il prodotto Finocchi 1 kg non è disponibile per la fascia scelta"/);
+  assert.equal(visits.filter((v) => v.includes('/checkout/begin')).length, 2, 'one retry only');
 });
