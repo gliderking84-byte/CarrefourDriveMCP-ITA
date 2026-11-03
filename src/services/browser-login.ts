@@ -1,7 +1,8 @@
 import { createRequire } from 'module';
 import { spawn } from 'child_process';
 import { createServer } from 'net';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readlinkSync, rmSync } from 'fs';
+import { hostname } from 'os';
 import { join, win32 } from 'path';
 import { sessionService, CARREFOUR_ORIGIN } from './session.service.js';
 import { browserService } from './browser.service.js';
@@ -105,6 +106,76 @@ export const GOOGLE_LOGIN_URL =
   '?oauthProvider=Google&regbtn=0&isLoginFlow=true';
 const POLL_MS = 2000;
 
+/**
+ * Free the login profile from a Chromium that no longer owns it.
+ *
+ * Chromium marks a profile in use with a `SingletonLock` symlink whose target
+ * is `<hostname>-<pid>`. A second launch on a locked profile does not open a
+ * window: it hands its URL to the live process and exits at once, or, when the
+ * lock names another host, refuses the profile as used "on another computer".
+ * Both happen in Docker: a login window left open from an earlier attempt, and a
+ * rebuilt container (new hostname) finding the old lock in the /data volume.
+ *
+ * A lock from another host or a dead process is removed. A live login window
+ * on this host is one of ours, abandoned: it is stopped first, unless
+ * `stopLive` is false. Returns what was done, for the log.
+ */
+export function releaseProfileLock(
+  dir: string,
+  deps: {
+    readLink?: (path: string) => string;
+    host?: string;
+    alive?: (pid: number) => boolean;
+    kill?: (pid: number) => void;
+    remove?: (path: string) => void;
+    /** Stop a live window holding the profile (default). Without it, a live lock is left alone. */
+    stopLive?: boolean;
+  } = {}
+): 'none' | 'stale' | 'stopped' | 'live' {
+  const readLink = deps.readLink ?? readlinkSync;
+  const host = deps.host ?? hostname();
+  const alive =
+    deps.alive ??
+    ((pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  const kill = deps.kill ?? ((pid: number) => process.kill(pid, 'SIGTERM'));
+  const remove = deps.remove ?? ((path: string) => rmSync(path, { force: true }));
+
+  let target: string;
+  try {
+    target = readLink(join(dir, 'SingletonLock'));
+  } catch {
+    return 'none';
+  }
+  const match = target.match(/^(.*)-(\d+)$/);
+  const owner = match?.[1];
+  const pid = match ? Number(match[2]) : NaN;
+  let outcome: 'stale' | 'stopped' = 'stale';
+  if (owner === host && Number.isFinite(pid) && pid !== process.pid && alive(pid)) {
+    if (deps.stopLive === false) return 'live';
+    try {
+      kill(pid);
+      outcome = 'stopped';
+    } catch {
+      // Gone in the meantime.
+    }
+  }
+  for (const name of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    try {
+      remove(join(dir, name));
+    } catch {
+      // Nothing to remove.
+    }
+  }
+  return outcome;
+}
+
 export interface BrowserLoginOptions {
   waitMs?: number;
   browser?: LoginBrowser;
@@ -188,12 +259,20 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
   const { chromium } = await import('playwright');
   const browser = opts.browser ?? findLoginBrowser() ?? playwrightChromium();
   const executable = browser.path;
+  const label = browser.label;
   const port = await freePort();
   // A dedicated profile, kept between logins: Cloudflare is far quicker with a
   // browser it has seen before than with a blank one. Never the user's own
   // profile (Chrome refuses remote debugging on it), never the server's.
   const dir = dataPath('login-profile');
   mkdirSync(dir, { recursive: true });
+  const lock = releaseProfileLock(dir);
+  if (lock === 'stopped') {
+    logger.info('Stopped a login window left open on the login profile');
+    await sleep(1500);
+  } else if (lock === 'stale') {
+    logger.info('Removed a stale lock from the login profile');
+  }
   const waitMs = opts.waitMs ?? 900_000;
   const startUrl = opts.startUrl ?? LOGIN_URL;
   logger.info('Opening the login window', { browser: browser.label, executable, startUrl, headless: !!opts.headless });
@@ -213,17 +292,22 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
   );
   child.unref();
   let exited = false;
-  child.once('exit', () => {
+  let exitInfo = '';
+  const startedAt = Date.now();
+  child.once('exit', (code, signal) => {
     exited = true;
+    exitInfo = `${signal ? `signal ${signal}` : `code ${code}`} after ${Math.round((Date.now() - startedAt) / 1000)} s`;
   });
   // Without a listener, a failed spawn (missing executable) would crash the whole server.
   child.once('error', (error) => {
     exited = true;
+    exitInfo = String(error);
     logger.error('Could not start the login browser', { executable, error: String(error) });
   });
 
   let signedIn = false;
   let lastUrl = '';
+  let answered = false;
   const deadline = Date.now() + waitMs;
   try {
     while (Date.now() < deadline) {
@@ -237,6 +321,7 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
         // Not up yet, or the user closed the window.
         continue;
       }
+      answered = true;
       if (tabs.length === 0) break;
       lastUrl = tabs.find((tab) => tab.type === 'page')?.url ?? lastUrl;
       if (loggedIn(tabs)) {
@@ -246,6 +331,15 @@ export async function browserLogin(opts: BrowserLoginOptions = {}): Promise<stri
     }
 
     if (!signedIn) {
+      logger.info('Login window outcome', { exited, exitInfo, answered, lastUrl: lastUrl ? stopPoint(lastUrl) : '' });
+      if (!answered) {
+        return exited
+          ? `The login browser (${label}) closed right after starting (${exitInfo}), before opening any page. ` +
+              'Its profile may be locked by another browser, or the browser cannot start here (display, sandbox); ' +
+              'see the server log.'
+          : `The login browser (${label}) never answered on its debugging port within ${Math.round(waitMs / 1000)} s. ` +
+              'See the server log.';
+      }
       return (
         'The login did not complete: the window was closed, or never left the login page' +
         `${lastUrl ? ` (it stopped at ${stopPoint(lastUrl)})` : ''}. Run the tool ` +
@@ -369,6 +463,8 @@ export function openInUserBrowser(url: string): { opened: boolean; browser: stri
   }
   const dir = dataPath('login-profile');
   mkdirSync(dir, { recursive: true });
+  // A live window keeps its lock: the URL then opens in it, as a link click would.
+  if (releaseProfileLock(dir, { stopLive: false }) === 'stale') logger.info('Removed a stale lock from the login profile');
   try {
     const child = spawn(browser.path, [`--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', ...sandboxFlags(), url], {
       stdio: 'ignore',
