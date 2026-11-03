@@ -277,6 +277,68 @@ class BrowserService {
   }
 
   /**
+   * The card form as carrefour.it shows it: the order's payment page either leaves carrefour.it
+   * (top level) or shows Market Pay's page in an iframe. Returns that exact URL (hash included,
+   * which is what tells Market Pay which form to show) and how many card fields it renders, both
+   * where carrefour.it shows it and opened on its own (as on a phone). Fields are counted, never
+   * filled. url '' when no provider page shows up.
+   */
+  async cardPageFrom(url: string, provider: RegExp, timeoutMs = 25000): Promise<{ url: string; fields: number; standaloneFields: number }> {
+    const context = await this.ensureContext();
+    const deadline = Date.now() + timeoutMs;
+    const CARD_FIELDS =
+      'input[autocomplete="cc-number"], input[autocomplete="cc-exp"], input[autocomplete="cc-csc"], input[name*="card" i], input[id*="card" i], input[name*="pan" i], input[id*="pan" i], input[name*="cvv" i], input[id*="cvv" i], input[name*="cvc" i], input[id*="cvc" i], input[name*="numero" i], input[id*="numero" i]';
+    // card fields in the page and in all its frames (the number field is often a nested iframe)
+    const countFields = async (page: Page): Promise<number> => {
+      let n = 0;
+      for (const f of page.frames()) n += await f.locator(CARD_FIELDS).count().catch(() => 0);
+      return n;
+    };
+    const settle = async (page: Page) => {
+      await page.waitForLoadState('networkidle', { timeout: Math.min(8000, Math.max(1000, deadline - Date.now())) }).catch(() => undefined);
+    };
+    let found = '';
+    let fields = 0;
+    const page = await context.newPage();
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs }).catch(() => undefined);
+      while (Date.now() < deadline && !found) {
+        if (provider.test(page.url())) found = page.url();
+        else found = page.frames().map((f) => f.url()).find((u) => provider.test(u)) ?? '';
+        if (!found) await page.waitForTimeout(250);
+      }
+      if (found) {
+        await settle(page);
+        // the frame may have moved on (selection → card form): keep its latest URL
+        const latest = provider.test(page.url()) ? page.url() : page.frames().map((f) => f.url()).find((u) => provider.test(u));
+        if (latest) found = latest;
+        fields = await countFields(page);
+      }
+    } finally {
+      await page.close().catch(() => undefined);
+    }
+    if (!found) return { url: '', fields: 0, standaloneFields: 0 };
+    let standaloneFields = 0;
+    const alone = await context.newPage();
+    try {
+      await alone.goto(found, { waitUntil: 'domcontentloaded', timeout: Math.max(5000, deadline - Date.now()) }).catch(() => undefined);
+      await settle(alone);
+      standaloneFields = await countFields(alone);
+    } finally {
+      await alone.close().catch(() => undefined);
+    }
+    let shape = '';
+    try {
+      const u = new URL(found);
+      shape = `${u.host}${u.pathname}${u.hash}`; // no session id in the logs
+    } catch {
+      /* ignore */
+    }
+    logger.info('Card payment page', { page: shape, fields, standaloneFields });
+    return { url: found, fields, standaloneFields };
+  }
+
+  /**
    * From the payment provider's hosted page (Market Pay, `#pay=EWALLET_PAYPAL` preselects PayPal) to
    * PayPal's own page: press the provider's pay button in a throwaway tab and read where it lands
    * (same tab or a popup). PayPal's URL carries its own token, works on any device and, on a phone

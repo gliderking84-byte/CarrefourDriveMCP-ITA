@@ -171,6 +171,29 @@ async function payPalBehind(provider: string): Promise<string> {
   }
 }
 
+/**
+ * Market Pay's card page exactly as carrefour.it shows it (the URL the order's payment page leaves
+ * for, or its iframe), with how many card fields it renders there and opened on its own.
+ */
+async function cardPage(page: string): Promise<{ url: string; fields: number; standaloneFields: number }> {
+  try {
+    return await browserService.cardPageFrom(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS + 10000);
+  } catch (error) {
+    logger.info('Card payment page not reached', { error: String(error) });
+    return { url: '', fields: 0, standaloneFields: 0 };
+  }
+}
+/** When the card fields only show inside carrefour.it, the link alone will not let the user pay. */
+function cardWarning(card: { url: string; fields: number; standaloneFields: number }): string[] {
+  if (!card.url || card.standaloneFields > 0) return [];
+  return [
+    card.fields > 0
+      ? 'Warning: Market Pay shows the card fields only inside the carrefour.it page, not when this link is opened on its own (CARD_FIELDS_ONLY_ON_CARREFOUR). Pay from the server\'s screen or choose PayPal.'
+      : 'Warning: no card fields were found on the card page (CARD_FIELDS_NOT_FOUND). If the page shows no card form, pay from the server\'s screen or choose PayPal.',
+    '',
+  ];
+}
+
 /** The link to hand the user: PayPal (also behind the provider's page), else the provider's page, else `seu`. */
 async function paymentLinkFrom(page: string): Promise<{ url: string; paypal: boolean }> {
   let provider = '';
@@ -488,7 +511,8 @@ export function registerCheckoutTools(server: McpServer): void {
         if (method === 'MARKETPAY') {
           // The card form is Market Pay's hosted page (carrefour.it shows it in an iframe). Its URL
           // carries the session, so it works on any device; nothing is pressed on it here.
-          const cardUrl = providerPageOf(redirectUrl);
+          const card = await cardPage(redirectUrl);
+          const cardUrl = card.url || providerPageOf(redirectUrl);
           const window = openInUserBrowser(cardUrl || redirectUrl);
           logger.info('Order placed, card payment page handed to the user', { orderNumber, browser: window.browser, provider: Boolean(cardUrl) });
           return text(
@@ -498,6 +522,7 @@ export function registerCheckoutTools(server: McpServer): void {
               "Card payment link (Mastercard, Visa or American Express, on Market Pay's secure page — works on any device):",
               cardUrl || redirectUrl,
               '',
+              ...cardWarning(card),
               window.opened
                 ? process.env.CARREFOUR_DESK_URL
                   ? `The payment page is also open on the server's screen (${process.env.CARREFOUR_DESK_URL}).`
@@ -585,10 +610,16 @@ export function registerCheckoutTools(server: McpServer): void {
         if (!page) throw new SfccError(`No payment page known for order ${order_number}: pass payment_page_url as printed by place_order.`);
         const method: PaymentMethod = payment_method ?? paymentMethods.get(order_number) ?? 'MP_PAYPAL';
         let paypalUrl = '';
+        let renewedCard = { url: '', fields: 0, standaloneFields: 0 };
         try {
-          paypalUrl = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
-          // A card order stays on Market Pay's card page: nothing is pressed there.
-          if (method !== 'MARKETPAY') paypalUrl = (await payPalBehind(paypalUrl)) || paypalUrl;
+          if (method === 'MARKETPAY') {
+            // A card order stays on Market Pay's card page, as carrefour.it shows it: nothing is pressed there.
+            renewedCard = await cardPage(page);
+            paypalUrl = renewedCard.url || (await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS));
+          } else {
+            paypalUrl = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
+            paypalUrl = (await payPalBehind(paypalUrl)) || paypalUrl;
+          }
         } catch (error) {
           logger.info('renew_payment_link: no payment page', { order: order_number, error: String(error) });
           throw new SfccError(
@@ -604,6 +635,7 @@ export function registerCheckoutTools(server: McpServer): void {
               `New card payment link for order ${order_number} (Mastercard, Visa or American Express on Market Pay's secure page, works on any device):`,
               paypalUrl,
               '',
+              ...cardWarning(renewedCard),
               'The order is only confirmed once paid.',
             ].join('\n')
           );
