@@ -32,6 +32,9 @@ const originalVisit = browserService.visit.bind(browserService);
 const originalFollow = browserService.followRedirect.bind(browserService);
 const originalMessages = browserService.pageMessages.bind(browserService);
 const originalPayPal = browserService.payPalFromProvider.bind(browserService);
+const originalCard = browserService.cardPageFrom.bind(browserService);
+/** Market Pay's card page as carrefour.it shows it; url '' = not found. */
+let cardFrame = { url: '', fields: 0, standaloneFields: 0 };
 /** PayPal behind the provider's page ("Paga" pressed there); '' = not reached. */
 let paypalBehind = '';
 const pressed: string[] = [];
@@ -108,6 +111,7 @@ before(() => {
     return { status: 200, finalUrl: landings.length ? landings.shift()! : landing };
   };
   browserService.pageMessages = async () => cartMessages;
+  browserService.cardPageFrom = async () => cardFrame;
   browserService.payPalFromProvider = async (url: string) => {
     pressed.push(url);
     return paypalBehind;
@@ -124,6 +128,7 @@ after(() => {
   browserService.followRedirect = originalFollow;
   browserService.pageMessages = originalMessages;
   browserService.payPalFromProvider = originalPayPal;
+  browserService.cardPageFrom = originalCard;
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -131,6 +136,7 @@ beforeEach(() => {
   calls.length = 0;
   pressed.length = 0;
   paypalBehind = '';
+  cardFrame = { url: '', fields: 0, standaloneFields: 0 };
   visits.length = 0;
   respond = happy;
   landing = 'https://www.carrefour.it/checkout/begin?cart=1&rurl=2';
@@ -465,6 +471,27 @@ test('place_order by card sends MARKETPAY and hands over the card page, pressing
   assert.match(renewed.text, /New card payment link/);
   assert.match(renewed.text, /https:\/\/hpp\.example\/selection/);
   assert.deepEqual(pressed, []);
+});
+
+test('place_order by card hands over the card page exactly as carrefour.it shows it', async () => {
+  cardFrame = { url: 'https://hpp.example/selection.hpp?sessionId=S#pay=CARD', fields: 3, standaloneFields: 3 };
+  const c = await client();
+  assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+  const res = await run(c, 'place_order', { confirm: true, payment_method: 'MARKETPAY' });
+  assert.equal(res.isError, false, res.text);
+  assert.equal([...res.text.matchAll(/https?:\/\/\S+/g)].map((m) => m[0])[0], cardFrame.url, 'the URL carrefour.it uses, hash included');
+  assert.doesNotMatch(res.text, /CARD_FIELDS/);
+
+  // fields only inside carrefour.it: the link alone is not enough, and the tool says so
+  cardFrame = { url: 'https://hpp.example/card', fields: 3, standaloneFields: 0 };
+  const renewed = await run(c, 'renew_payment_link', { order_number: '03070001' });
+  assert.equal(renewed.isError, false, renewed.text);
+  assert.match(renewed.text, /https:\/\/hpp\.example\/card/);
+  assert.match(renewed.text, /CARD_FIELDS_ONLY_ON_CARREFOUR/);
+
+  cardFrame = { url: 'https://hpp.example/card', fields: 0, standaloneFields: 0 };
+  const none = await run(c, 'renew_payment_link', { order_number: '03070001' });
+  assert.match(none.text, /CARD_FIELDS_NOT_FOUND/);
 });
 
 test('place_order refuses an unknown payment method before creating anything', async () => {
