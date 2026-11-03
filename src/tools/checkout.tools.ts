@@ -65,6 +65,11 @@ export interface PaymentBlock {
   total?: string;
   /** Hours the link stays valid, when known (PayPal: 3). */
   expires_in_hours?: number;
+  /**
+   * Card only, when it could be checked: whether the link opened on its own shows the card form.
+   * false: the form only shows inside carrefour.it — offer the server's screen (desk) or PayPal.
+   */
+  link_shows_card_form?: boolean;
   /** Tool that tells whether the order got paid. */
   check_with: 'get_order_status';
 }
@@ -580,6 +585,7 @@ export function registerCheckoutTools(server: McpServer): void {
               provider: cardUrl ? 'market_pay_card' : 'carrefour',
               carrefour_payment_page: redirectUrl,
               total: placed.total === undefined ? undefined : String(placed.total),
+              link_shows_card_form: card.url ? card.standaloneFields > 0 : undefined,
               check_with: 'get_order_status',
             }
           );

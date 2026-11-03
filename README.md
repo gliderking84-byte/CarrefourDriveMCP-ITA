@@ -283,7 +283,9 @@ Open `payment_url` in a new tab or in-app browser: the card details are typed on
 Market Pay's page (and confirmed with the bank), never in the PWA or through the
 server. Then call `get_order_status`. `provider` is `paypal` (with
 `expires_in_hours: 3`), `market_pay_card`, `market_pay` or `carrefour` (the
-carrefour.it page, which needs the session).
+carrefour.it page, which needs the session). For card orders,
+`link_shows_card_form` (when it could be checked) says whether the link opened
+on its own shows the card form; when `false`, offer the desk or PayPal instead.
 Drive is not supported yet.
 
 ### Shopping lists & bulk cart

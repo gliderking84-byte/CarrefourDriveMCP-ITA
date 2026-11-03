@@ -562,3 +562,18 @@ test('a refused order carries no payment block', async () => {
   assert.equal(result.isError, true);
   assert.equal(result.structuredContent, undefined);
 });
+
+test('the card payment block says whether the link alone shows the card form', async () => {
+  for (const [frame, expected] of [
+    [{ url: 'https://hpp.example/selection.hpp?sessionId=S#pay=CARD', fields: 3, standaloneFields: 3 }, true],
+    [{ url: 'https://hpp.example/card', fields: 3, standaloneFields: 0 }, false],
+  ] as const) {
+    resetPreparedCheckout();
+    cardFrame = { ...frame };
+    const c = await client();
+    assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+    const payment = await paymentBlock(c, 'place_order', { confirm: true, payment_method: 'MARKETPAY' });
+    assert.equal(payment.payment_url, frame.url);
+    assert.equal(payment.link_shows_card_form, expected);
+  }
+});
