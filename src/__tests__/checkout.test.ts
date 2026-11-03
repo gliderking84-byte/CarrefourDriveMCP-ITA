@@ -38,6 +38,9 @@ let cardFrame = { url: '', fields: 0, standaloneFields: 0 };
 /** PayPal behind the provider's page ("Paga" pressed there); '' = not reached. */
 let paypalBehind = '';
 const pressed: string[] = [];
+/** PayPal reached by pressing "Paga" on carrefour.it's payment page; '' = not reached. */
+let paypalViaCarrefour = '';
+const viaCarrefour: string[] = [];
 let landings: string[] = [];
 let cartMessages: string[] = [];
 let paypalLanding: string | null = null;
@@ -113,6 +116,12 @@ before(() => {
   browserService.pageMessages = async () => cartMessages;
   browserService.cardPageFrom = async () => cardFrame;
   browserService.payPalFromProvider = async (url: string) => {
+    // carrefour.it's own payment page: lands on PayPal by itself, or "Paga" pressed in Market Pay's iframe
+    if (/carrefour\.it/.test(url)) {
+      if (paypalLanding && /paypal\.com/.test(paypalLanding)) return paypalLanding;
+      viaCarrefour.push(url);
+      return paypalViaCarrefour;
+    }
     pressed.push(url);
     return paypalBehind;
   };
@@ -136,6 +145,8 @@ beforeEach(() => {
   calls.length = 0;
   pressed.length = 0;
   paypalBehind = '';
+  viaCarrefour.length = 0;
+  paypalViaCarrefour = '';
   cardFrame = { url: '', fields: 0, standaloneFields: 0 };
   visits.length = 0;
   respond = happy;
@@ -370,6 +381,23 @@ test('place_order presses Paga on the provider page and hands over PayPal (the a
     assert.deepEqual(pressed, [paypalLanding], 'Paga pressed on the provider page, once');
     assert.equal([...res.text.matchAll(/https?:\/\/\S+/g)].map((m) => m[0])[0], paypalBehind);
     assert.match(res.text, /Payment link \(PayPal/);
+  } finally {
+    paypalLanding = null;
+  }
+});
+
+test("place_order presses Paga on carrefour.it's payment page first, as the user does", async () => {
+  paypalLanding = 'https://hpp2.prod.mpg.market-pay.com/hppv22/checkout.hpp?sessionId=S3';
+  paypalViaCarrefour = 'https://www.paypal.com/checkoutnow?token=EC-VIA-CARREFOUR';
+  try {
+    const c = await client();
+    assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+    const res = await run(c, 'place_order', { confirm: true });
+    assert.equal(res.isError, false, res.text);
+    assert.equal(viaCarrefour.length, 1);
+    assert.match(viaCarrefour[0], /PayOnline-Checkout/);
+    assert.deepEqual(pressed, [], "Market Pay's page on its own is not needed");
+    assert.equal([...res.text.matchAll(/https?:\/\/\S+/g)].map((m) => m[0])[0], paypalViaCarrefour);
   } finally {
     paypalLanding = null;
   }
