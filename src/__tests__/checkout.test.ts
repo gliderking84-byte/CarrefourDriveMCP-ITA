@@ -475,3 +475,63 @@ test('place_order refuses an unknown payment method before creating anything', a
   assert.equal(res.isError, true);
   assert.equal(calls.some((r) => step(r) === 'payment'), false);
 });
+
+/** The payment block, as a program reads it: structured content, and the same JSON in the second text block. */
+async function paymentBlock(c: Awaited<ReturnType<typeof client>>, name: string, args: Record<string, unknown>) {
+  const result = (await c.callTool({ name, arguments: args })) as {
+    isError?: boolean;
+    content: Array<{ text: string }>;
+    structuredContent?: { payment?: Record<string, unknown> };
+  };
+  assert.equal(result.isError === true, false, result.content[0].text);
+  assert.equal(result.content.length, 2);
+  assert.deepEqual(JSON.parse(result.content[1].text), result.structuredContent);
+  return result.structuredContent!.payment!;
+}
+
+test('place_order by card returns a payment block a PWA can open', async () => {
+  const c = await client();
+  assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+  const payment = await paymentBlock(c, 'place_order', { confirm: true, payment_method: 'MARKETPAY' });
+  assert.deepEqual(payment, {
+    order_number: '03070001',
+    payment_method: 'MARKETPAY',
+    payment_url: 'https://hpp.example/checkout',
+    provider: 'market_pay_card',
+    carrefour_payment_page:
+      'https://www.carrefour.it/on/demandware.store/Sites-carrefour-IT-Site/it_IT/PayOnline-Checkout?seu=https%3a%2f%2fhpp.example%2fcheckout&orderNumber=03070001',
+    total: payment.total,
+    check_with: 'get_order_status',
+  });
+  assert.ok(payment.total, 'the total from prepare_checkout');
+});
+
+test('place_order with PayPal returns the PayPal link and its 3-hour validity in the block', async () => {
+  const c = await client();
+  assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+  paypalBehind = 'https://www.paypal.com/checkoutnow?token=EC-1';
+  const payment = await paymentBlock(c, 'place_order', { confirm: true });
+  assert.equal(payment.payment_method, 'MP_PAYPAL');
+  assert.equal(payment.payment_url, 'https://www.paypal.com/checkoutnow?token=EC-1');
+  assert.equal(payment.provider, 'paypal');
+  assert.equal(payment.expires_in_hours, 3);
+
+  paypalLanding = 'https://www.paypal.com/checkoutnow?token=EC-2';
+  try {
+    const renewed = await paymentBlock(c, 'renew_payment_link', { order_number: '03070001' });
+    assert.equal(renewed.payment_url, 'https://www.paypal.com/checkoutnow?token=EC-2');
+    assert.equal(renewed.provider, 'paypal');
+  } finally {
+    paypalLanding = null;
+  }
+});
+
+test('a refused order carries no payment block', async () => {
+  const c = await client();
+  const result = (await c.callTool({ name: 'place_order', arguments: { confirm: true } })) as {
+    isError?: boolean;
+    structuredContent?: unknown;
+  };
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent, undefined);
+});
