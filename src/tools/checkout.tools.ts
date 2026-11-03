@@ -35,8 +35,14 @@ const PAYPAL_REDIRECT_TIMEOUT_MS = parseInt(process.env.PAYPAL_REDIRECT_TIMEOUT_
 
 /** place_order only follows a prepare_checkout this recent. */
 const PREPARED_TTL_MS = 30 * 60_000;
-/** Payment methods seen in real traffic. Others exist on the site but were not captured. */
-const PAYMENT_METHODS = ['MP_PAYPAL'] as const;
+/**
+ * Payment methods of the checkout's "Metodi di pagamento" list, as captured:
+ * MP_PAYPAL (PayPal) and MARKETPAY (Mastercard, Visa or American Express on
+ * Market Pay's hosted page). Meal vouchers, gift cards and Payback points are
+ * applied before this step on the site and are not supported here.
+ */
+const PAYMENT_METHODS = ['MP_PAYPAL', 'MARKETPAY'] as const;
+type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 function text(body: string, isError = false) {
   return { content: [{ type: 'text' as const, text: body }], isError };
@@ -130,6 +136,8 @@ let prepared: { at: number; total: unknown; address: string; timeslot: string } 
 
 /** carrefour.it payment page of each order placed here (orderNumber → URL), for renew_payment_link. */
 const paymentPages = new Map<string, string>();
+/** How each order placed here is paid, so a renewed link leads to the same method. */
+const paymentMethods = new Map<string, PaymentMethod>();
 const PAYPAL_URL = /^https:\/\/([a-z0-9-]+\.)*paypal\.com\//i;
 /** Any https page outside carrefour.it: the payment provider's page (Market Pay, then PayPal). */
 const OFF_CARREFOUR = /^https:\/\/(?!(?:[a-z0-9-]+\.)*carrefour\.it(?:[/:?#]|$))[^\s]+/i;
@@ -431,13 +439,18 @@ export function registerCheckoutTools(server: McpServer): void {
     'place_order',
     'PLACES THE ORDER prepared by prepare_checkout and opens the payment page in the user\'s browser, where they ' +
       'pay themselves (PayPal sign-in / card 3-D Secure cannot be automated). Creates a real order on carrefour.it: ' +
-      'call it only after the user has seen the prepare_checkout summary and explicitly said to go ahead.',
+      'call it only after the user has seen the prepare_checkout summary and explicitly said to go ahead. Ask the ' +
+      'user how they want to pay: PayPal (MP_PAYPAL, default) or card (MARKETPAY: Mastercard, Visa, American Express).',
     {
       confirm: z.boolean().describe('Must be true: the user explicitly approved the summary from prepare_checkout.'),
       payment_method: z
         .enum(PAYMENT_METHODS)
         .optional()
-        .describe("Payment method. Only 'MP_PAYPAL' (PayPal) is supported so far."),
+        .describe(
+          "'MP_PAYPAL' (PayPal, default) or 'MARKETPAY' (credit/debit card: Mastercard, Visa or American Express, " +
+            "typed by the user on Market Pay's secure page; the total is pre-authorised and the final amount " +
+            'charged once the groceries are prepared).'
+        ),
       order_notes: z.string().optional().describe('Notes for the order (e.g. delivery instructions).'),
     },
     async ({ confirm, payment_method, order_notes }) => {
@@ -447,13 +460,14 @@ export function registerCheckoutTools(server: McpServer): void {
       if (!prepared || Date.now() - prepared.at > PREPARED_TTL_MS) {
         return text('Not placed: run prepare_checkout first (within the last 30 minutes) and show its summary to the user.', true);
       }
+      const method: PaymentMethod = payment_method ?? 'MP_PAYPAL';
       try {
         await requireSignedIn();
         const data = check(
           'Order',
           await sfccJson('POST', `${CARREFOUR_ORIGIN}/checkout/payment`, {
             form: {
-              paymentOptions: payment_method ?? 'MP_PAYPAL',
+              paymentOptions: method,
               billingAddressEnabled: 'false',
               orderNotes: order_notes ?? '',
               csrf_token: await getCsrfToken(),
@@ -466,7 +480,38 @@ export function registerCheckoutTools(server: McpServer): void {
         const orderNumber = new URL(redirectUrl).searchParams.get('orderNumber') ?? 'unknown';
         const placed = prepared;
         prepared = null;
-        if (orderNumber !== 'unknown') paymentPages.set(orderNumber, redirectUrl);
+        if (orderNumber !== 'unknown') {
+          paymentPages.set(orderNumber, redirectUrl);
+          paymentMethods.set(orderNumber, method);
+        }
+
+        if (method === 'MARKETPAY') {
+          // The card form is Market Pay's hosted page (carrefour.it shows it in an iframe). Its URL
+          // carries the session, so it works on any device; nothing is pressed on it here.
+          const cardUrl = providerPageOf(redirectUrl);
+          const window = openInUserBrowser(cardUrl || redirectUrl);
+          logger.info('Order placed, card payment page handed to the user', { orderNumber, browser: window.browser, provider: Boolean(cardUrl) });
+          return text(
+            [
+              `Order ${orderNumber} created on carrefour.it — total ${String(placed.total)}, ${placed.address}, ${placed.timeslot}.`,
+              '',
+              "Card payment link (Mastercard, Visa or American Express, on Market Pay's secure page — works on any device):",
+              cardUrl || redirectUrl,
+              '',
+              window.opened
+                ? process.env.CARREFOUR_DESK_URL
+                  ? `The payment page is also open on the server's screen (${process.env.CARREFOUR_DESK_URL}).`
+                  : `The payment page is also open in ${window.browser}.`
+                : `Could not open a browser (${window.error}); use the link.`,
+              '',
+              'The user types the card details there and confirms with their bank (3-D Secure). The total is ' +
+                'pre-authorised (held) and the final amount is charged once the groceries are prepared.',
+              `If the link stops working, call renew_payment_link with this order number (carrefour.it payment page: ${redirectUrl}).`,
+              '',
+              'The order is only confirmed once paid; an unpaid order is cancelled by carrefour.it. Check it with get_orders.',
+            ].join('\n')
+          );
+        }
 
         // carrefour.it sends the payment page on to PayPal. The PayPal URL carries its own token, so
         // it works on any device and opens the PayPal app on a phone: hand that over when we can.
@@ -505,7 +550,7 @@ export function registerCheckoutTools(server: McpServer): void {
 
   server.tool(
     'renew_payment_link',
-    'Gives a NEW PayPal payment link for an order placed with place_order that is not paid yet (the old link ' +
+    'Gives a NEW payment link (PayPal, or the card page for orders paid by card) for an order placed with place_order that is not paid yet (the old link ' +
       'expired, the payment was cancelled, or the page no longer opens). It reopens the order\'s carrefour.it ' +
       'payment page in the signed-in browser and follows it to PayPal. It does not create a new order. If ' +
       'carrefour.it no longer sends the order to PayPal, the order was cancelled (unpaid) or already paid: check ' +
@@ -516,8 +561,12 @@ export function registerCheckoutTools(server: McpServer): void {
         .string()
         .optional()
         .describe('The carrefour.it payment page printed by place_order; needed after a server restart.'),
+      payment_method: z
+        .enum(PAYMENT_METHODS)
+        .optional()
+        .describe("How the order is paid, as chosen in place_order; needed after a server restart for card ('MARKETPAY') orders."),
     },
-    async ({ order_number, payment_page_url }) => {
+    async ({ order_number, payment_page_url, payment_method }) => {
       try {
         await requireSignedIn();
         let page = paymentPages.get(order_number) ?? '';
@@ -534,18 +583,31 @@ export function registerCheckoutTools(server: McpServer): void {
           page = given.toString();
         }
         if (!page) throw new SfccError(`No payment page known for order ${order_number}: pass payment_page_url as printed by place_order.`);
+        const method: PaymentMethod = payment_method ?? paymentMethods.get(order_number) ?? 'MP_PAYPAL';
         let paypalUrl = '';
         try {
           paypalUrl = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
-          paypalUrl = (await payPalBehind(paypalUrl)) || paypalUrl;
+          // A card order stays on Market Pay's card page: nothing is pressed there.
+          if (method !== 'MARKETPAY') paypalUrl = (await payPalBehind(paypalUrl)) || paypalUrl;
         } catch (error) {
           logger.info('renew_payment_link: no payment page', { order: order_number, error: String(error) });
           throw new SfccError(
-            `carrefour.it no longer sends order ${order_number} to PayPal: it was probably cancelled for missing payment ` +
+            `carrefour.it no longer sends order ${order_number} to ${method === 'MARKETPAY' ? 'the card payment page' : 'PayPal'}: it was probably cancelled for missing payment ` +
               '(or it is already paid — check get_orders). Place a new order to pay.'
           );
         }
         paymentPages.set(order_number, page);
+        paymentMethods.set(order_number, method);
+        if (method === 'MARKETPAY') {
+          return text(
+            [
+              `New card payment link for order ${order_number} (Mastercard, Visa or American Express on Market Pay's secure page, works on any device):`,
+              paypalUrl,
+              '',
+              'The order is only confirmed once paid.',
+            ].join('\n')
+          );
+        }
         return text(
           [
             `New payment link for order ${order_number} (${PAYPAL_URL.test(paypalUrl) ? 'PayPal — opens the PayPal app on a phone' : 'payment page with PayPal'}, works on any device):`,

@@ -230,7 +230,7 @@ the server fetches a CSRF token (`…/CSRF-Generate`) right before sending it.
 | `apply_coupon` 🔒✍️ | discount code (`…/CheckoutServices-AddCoupon`) |
 | `prepare_checkout` 🔒✍️ | reserves the slot, opens `/checkout/begin`, submits the address (`/checkout/shipping-submit`), validates it against the delivery CAP and sets the slot (`…/Checkout-UpdateTimeslot`); returns items, delivery cost and total. **Orders nothing.** Home delivery, or pickup in store (`shippingMethodId: pickup_in_store`, with the store's `cap` and `city` from `find_stores`; no address is submitted). |
 | `place_order` 🔒✍️ | **creates the order** (`/checkout/payment`) and opens the payment page in your browser |
-| `renew_payment_link` 🔒 | a **new PayPal link** for an unpaid order (old link expired or payment cancelled): reopens the order's carrefour.it payment page and follows it to PayPal. Creates no order; fails when carrefour.it no longer sends the order to PayPal (cancelled or already paid) |
+| `renew_payment_link` 🔒 | a **new payment link** (PayPal, or the card page for card orders) for an unpaid order (old link expired or payment cancelled): reopens the order's carrefour.it payment page and follows it to PayPal. Creates no order; fails when carrefour.it no longer sends the order to PayPal (cancelled or already paid) |
 
 Ordering is a two-step, human-approved flow:
 
@@ -254,7 +254,19 @@ Ordering is a two-step, human-approved flow:
    cancelled while the order is still open, `renew_payment_link` gives a new
    one for the same order.
 
-Only PayPal (`MP_PAYPAL`) is supported so far: it is the only method captured.
+Payment methods (`place_order`'s `payment_method`, as in the checkout's
+*Metodi di pagamento*):
+
+- `MP_PAYPAL` — PayPal (default), as above.
+- `MARKETPAY` — Mastercard, Visa or American Express. The link is Market Pay's
+  hosted card page (the one carrefour.it shows in an iframe), which works on any
+  device; the user types the card there and confirms 3-D Secure. Nothing is
+  pressed on it by the server. The total is pre-authorised and the final amount
+  charged once the groceries are prepared. `renew_payment_link` keeps card
+  orders on the card page.
+
+Meal vouchers (Buoni Pasto), gift cards and Payback points are applied on the
+checkout page before this step and are not supported.
 Drive is not supported yet.
 
 ### Shopping lists & bulk cart
@@ -514,7 +526,7 @@ same private endpoints the website uses, with your own session.
 persisted, in `<data>/sessions/cookies.json` with `0600` permissions.
 
 **Can it place an order?** Yes, after you approve the summary — and you always
-pay yourself, in your browser. Only PayPal is supported so far.
+pay yourself, in your browser, with PayPal or a card (Mastercard, Visa, American Express).
 
 **I captured a HAR to add an endpoint — anything to watch out for?** A HAR of a
 login contains your password in clear text, and HARs carry your address and

@@ -442,3 +442,36 @@ test('providerPageOf reads the hosted payment page, never a carrefour.it one', a
   assert.equal(providerPageOf('https://www.carrefour.it/x/PayOnline-Checkout?orderNumber=1'), '');
   assert.equal(providerPageOf('not a url'), '');
 });
+
+test('place_order by card sends MARKETPAY and hands over the card page, pressing nothing', async () => {
+  const c = await client();
+  assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+  calls.length = 0;
+  paypalLanding = 'https://hpp.example/selection';
+  paypalBehind = 'https://www.paypal.com/checkoutnow?token=T';
+
+  const res = await run(c, 'place_order', { confirm: true, payment_method: 'MARKETPAY' });
+  assert.equal(res.isError, false, res.text);
+  assert.equal(form(calls.find((r) => step(r) === 'payment')!).paymentOptions, 'MARKETPAY');
+  assert.deepEqual(pressed, [], 'nothing is pressed on the card page');
+  assert.equal([...res.text.matchAll(/https?:\/\/\S+/g)].map((m) => m[0])[0], 'https://hpp.example/checkout');
+  assert.match(res.text, /Card payment link \(Mastercard, Visa or American Express/);
+  assert.match(res.text, /pre-authorised/);
+  assert.doesNotMatch(res.text, /paypal\.com/);
+
+  // A renewed link for this order stays on the card page.
+  const renewed = await run(c, 'renew_payment_link', { order_number: '03070001' });
+  assert.equal(renewed.isError, false, renewed.text);
+  assert.match(renewed.text, /New card payment link/);
+  assert.match(renewed.text, /https:\/\/hpp\.example\/selection/);
+  assert.deepEqual(pressed, []);
+});
+
+test('place_order refuses an unknown payment method before creating anything', async () => {
+  const c = await client();
+  assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+  calls.length = 0;
+  const res = await run(c, 'place_order', { confirm: true, payment_method: 'BUONI_PASTO' });
+  assert.equal(res.isError, true);
+  assert.equal(calls.some((r) => step(r) === 'payment'), false);
+});
