@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findLoginBrowser, loginBrowserCandidates } from '../services/browser-login.js';
+import { findLoginBrowser, loginBrowserCandidates, releaseProfileLock } from '../services/browser-login.js';
 
 const windowsEnv = {
   PROGRAMFILES: 'C:\\Program Files',
@@ -57,4 +57,56 @@ test('a stuck window is reported without its query string', async () => {
   assert.equal(stopPoint('https://accounts.google.com/v3/signin/identifier?client_id=x&state=secret'), 'accounts.google.com/v3/signin/identifier');
   assert.equal(stopPoint('about:blank'), 'about:blank');
   assert.equal(stopPoint('not a url'), 'an unknown page');
+});
+
+/** A fake profile: the lock target, which pids are alive, and what got killed or removed. */
+function lockScene(target: string | null, alivePids: number[] = []) {
+  const killed: number[] = [];
+  const removed: string[] = [];
+  const deps = {
+    host: 'carrefour-mcp',
+    readLink: () => {
+      if (target === null) throw new Error('ENOENT');
+      return target;
+    },
+    alive: (pid: number) => alivePids.includes(pid),
+    kill: (pid: number) => {
+      killed.push(pid);
+    },
+    remove: (path: string) => {
+      removed.push(path.split(/[\\/]/).pop()!);
+    },
+  };
+  return { deps, killed, removed };
+}
+
+test('releaseProfileLock leaves an unlocked profile alone', () => {
+  const { deps, killed, removed } = lockScene(null);
+  assert.equal(releaseProfileLock('/data/login-profile', deps), 'none');
+  assert.deepEqual([killed, removed], [[], []]);
+});
+
+test('releaseProfileLock removes a lock left by a previous container', () => {
+  const { deps, killed, removed } = lockScene('4f2a9c1d7e3b-123', [123]);
+  assert.equal(releaseProfileLock('/data/login-profile', deps), 'stale');
+  assert.deepEqual(killed, [], 'a pid from another host means nothing here');
+  assert.deepEqual(removed, ['SingletonLock', 'SingletonSocket', 'SingletonCookie']);
+});
+
+test('releaseProfileLock removes the lock of a browser that is gone', () => {
+  const { deps, killed, removed } = lockScene('carrefour-mcp-456', []);
+  assert.equal(releaseProfileLock('/data/login-profile', deps), 'stale');
+  assert.deepEqual(killed, []);
+  assert.equal(removed.length, 3);
+});
+
+test('releaseProfileLock stops a login window left open, unless told to keep it', () => {
+  const stop = lockScene('carrefour-mcp-789', [789]);
+  assert.equal(releaseProfileLock('/data/login-profile', stop.deps), 'stopped');
+  assert.deepEqual(stop.killed, [789]);
+  assert.equal(stop.removed.length, 3);
+
+  const keep = lockScene('carrefour-mcp-789', [789]);
+  assert.equal(releaseProfileLock('/data/login-profile', { ...keep.deps, stopLive: false }), 'live');
+  assert.deepEqual([keep.killed, keep.removed], [[], []]);
 });
