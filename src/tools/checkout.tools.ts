@@ -48,6 +48,49 @@ function text(body: string, isError = false) {
   return { content: [{ type: 'text' as const, text: body }], isError };
 }
 
+/**
+ * Where to pay, for a program rather than a person: a PWA opens `payment_url`
+ * itself instead of finding the link in the text. Sent as MCP structured
+ * content and, for clients that only pass text on (the Claude API's MCP
+ * connector), repeated as JSON in a second text block.
+ */
+export interface PaymentBlock {
+  order_number: string;
+  payment_method: PaymentMethod;
+  /** Open this: Market Pay's card page, PayPal, or Market Pay's page with PayPal. */
+  payment_url: string;
+  provider: 'market_pay_card' | 'paypal' | 'market_pay' | 'carrefour';
+  /** The carrefour.it payment page, for renew_payment_link after a restart. */
+  carrefour_payment_page?: string;
+  total?: string;
+  /** Hours the link stays valid, when known (PayPal: 3). */
+  expires_in_hours?: number;
+  /**
+   * Card only, when it could be checked: whether the link opened on its own shows the card form.
+   * false: the form only shows inside carrefour.it — offer the server's screen (desk) or PayPal.
+   */
+  link_shows_card_form?: boolean;
+  /** Tool that tells whether the order got paid. */
+  check_with: 'get_order_status';
+}
+
+function paymentResult(body: string, payment: PaymentBlock) {
+  const block = Object.fromEntries(Object.entries(payment).filter(([, v]) => v !== undefined && v !== '')) as Record<string, unknown>;
+  return {
+    content: [
+      { type: 'text' as const, text: body },
+      { type: 'text' as const, text: JSON.stringify({ payment: block }) },
+    ],
+    structuredContent: { payment: block },
+    isError: false,
+  };
+}
+
+function providerOf(url: string): PaymentBlock['provider'] {
+  if (PAYPAL_URL.test(url)) return 'paypal';
+  return OFF_CARREFOUR.test(url) ? 'market_pay' : 'carrefour';
+}
+
 // --- Address book --------------------------------------------------------------
 
 export interface SavedAddress {
@@ -515,7 +558,7 @@ export function registerCheckoutTools(server: McpServer): void {
           const cardUrl = card.url || providerPageOf(redirectUrl);
           const window = openInUserBrowser(cardUrl || redirectUrl);
           logger.info('Order placed, card payment page handed to the user', { orderNumber, browser: window.browser, provider: Boolean(cardUrl) });
-          return text(
+          return paymentResult(
             [
               `Order ${orderNumber} created on carrefour.it — total ${String(placed.total)}, ${placed.address}, ${placed.timeslot}.`,
               '',
@@ -534,7 +577,17 @@ export function registerCheckoutTools(server: McpServer): void {
               `If the link stops working, call renew_payment_link with this order number (carrefour.it payment page: ${redirectUrl}).`,
               '',
               'The order is only confirmed once paid; an unpaid order is cancelled by carrefour.it. Check it with get_orders.',
-            ].join('\n')
+            ].join('\n'),
+            {
+              order_number: orderNumber,
+              payment_method: method,
+              payment_url: cardUrl || redirectUrl,
+              provider: cardUrl ? 'market_pay_card' : 'carrefour',
+              carrefour_payment_page: redirectUrl,
+              total: placed.total === undefined ? undefined : String(placed.total),
+              link_shows_card_form: card.url ? card.standaloneFields > 0 : undefined,
+              check_with: 'get_order_status',
+            }
           );
         }
 
@@ -545,7 +598,7 @@ export function registerCheckoutTools(server: McpServer): void {
 
         const window = openInUserBrowser(paypalUrl || redirectUrl);
         logger.info('Order placed, payment page handed to the user', { orderNumber, browser: window.browser, provider: Boolean(paypalUrl) });
-        return text(
+        return paymentResult(
           [
             `Order ${orderNumber} created on carrefour.it — total ${String(placed.total)}, ${placed.address}, ${placed.timeslot}.`,
             '',
@@ -564,7 +617,17 @@ export function registerCheckoutTools(server: McpServer): void {
             `PayPal links expire ${PAYPAL_LINK_HOURS} hours after they are issued. For a new one, call renew_payment_link with this order number (carrefour.it payment page: ${redirectUrl}).`,
             '',
             'The order is only confirmed once paid. Check it afterwards in Il mio account > Ordini on carrefour.it.',
-          ].join('\n')
+          ].join('\n'),
+          {
+            order_number: orderNumber,
+            payment_method: method,
+            payment_url: paypalUrl || redirectUrl,
+            provider: providerOf(paypalUrl || redirectUrl),
+            carrefour_payment_page: redirectUrl,
+            total: placed.total === undefined ? undefined : String(placed.total),
+            expires_in_hours: PAYPAL_URL.test(paypalUrl) ? PAYPAL_LINK_HOURS : undefined,
+            check_with: 'get_order_status',
+          }
         );
       } catch (error) {
         logger.error('place_order failed', { error: String(error) });
@@ -630,23 +693,40 @@ export function registerCheckoutTools(server: McpServer): void {
         paymentPages.set(order_number, page);
         paymentMethods.set(order_number, method);
         if (method === 'MARKETPAY') {
-          return text(
+          return paymentResult(
             [
               `New card payment link for order ${order_number} (Mastercard, Visa or American Express on Market Pay's secure page, works on any device):`,
               paypalUrl,
               '',
               ...cardWarning(renewedCard),
               'The order is only confirmed once paid.',
-            ].join('\n')
+            ].join('\n'),
+            {
+              order_number,
+              payment_method: method,
+              payment_url: paypalUrl,
+              provider: 'market_pay_card',
+              carrefour_payment_page: page,
+              check_with: 'get_order_status',
+            }
           );
         }
-        return text(
+        return paymentResult(
           [
             `New payment link for order ${order_number} (${PAYPAL_URL.test(paypalUrl) ? 'PayPal — opens the PayPal app on a phone' : 'payment page with PayPal'}, works on any device):`,
             paypalUrl,
             '',
             `It expires ${PAYPAL_LINK_HOURS} hours from now. The order is only confirmed once paid.`,
-          ].join('\n')
+          ].join('\n'),
+          {
+            order_number,
+            payment_method: method,
+            payment_url: paypalUrl,
+            provider: providerOf(paypalUrl),
+            carrefour_payment_page: page,
+            expires_in_hours: PAYPAL_URL.test(paypalUrl) ? PAYPAL_LINK_HOURS : undefined,
+            check_with: 'get_order_status',
+          }
         );
       } catch (error) {
         logger.error('renew_payment_link failed', { error: String(error) });

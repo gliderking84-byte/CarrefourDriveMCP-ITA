@@ -267,6 +267,25 @@ Payment methods (`place_order`'s `payment_method`, as in the checkout's
 
 Meal vouchers (Buoni Pasto), gift cards and Payback points are applied on the
 checkout page before this step and are not supported.
+
+For programs (a PWA), `place_order` and `renew_payment_link` also return the
+payment as structured content, repeated as JSON in a second text block for
+clients that only pass text on (the Claude API's MCP connector):
+
+```json
+{ "payment": { "order_number": "01234567", "payment_method": "MARKETPAY",
+  "payment_url": "https://hpp2.prod.mpg.market-pay.com/hppv22/checkout.hpp?sessionId=…",
+  "provider": "market_pay_card", "carrefour_payment_page": "https://www.carrefour.it/…/PayOnline-Checkout?…",
+  "total": "€ 53,08", "check_with": "get_order_status" } }
+```
+
+Open `payment_url` in a new tab or in-app browser: the card details are typed on
+Market Pay's page (and confirmed with the bank), never in the PWA or through the
+server. Then call `get_order_status`. `provider` is `paypal` (with
+`expires_in_hours: 3`), `market_pay_card`, `market_pay` or `carrefour` (the
+carrefour.it page, which needs the session). For card orders,
+`link_shows_card_form` (when it could be checked) says whether the link opened
+on its own shows the card form; when `false`, offer the desk or PayPal instead.
 Drive is not supported yet.
 
 ### Shopping lists & bulk cart
