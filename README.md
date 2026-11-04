@@ -517,6 +517,18 @@ See `.env.example`. Main variables:
 | `MIN_DELAY_MS` / `MAX_DELAY_MS` | `150` / `600` | jitter between requests |
 | `LOG_LEVEL`, `CARREFOUR_LOG_DIR` | `info`, `<data>` | winston logs (files + stderr, **never stdout**) |
 
+## Update
+
+```sh
+git pull
+npm ci
+npm run build     # without this the server keeps running the OLD code in dist/
+```
+
+then restart the server. At start it prints the commit it runs
+(`MCP server ready … (commit b6fc2f2)`, also the `+b6fc2f2` in the MCP server
+version) and warns when `dist/` is older than `src/`.
+
 ## Verify the install
 
 From a source checkout:

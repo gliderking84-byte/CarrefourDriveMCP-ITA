@@ -1,3 +1,4 @@
+import { buildInfo } from './utils/build.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { registerSpecTools } from './spec/register.js';
 import { loadToolSpecs, type LoadResult } from './spec/loader.js';
@@ -23,7 +24,8 @@ function toolSpecs(): LoadResult {
 
 /** An MCP server with every carrefour.it tool registered, ready to connect to any transport. */
 export function createServer(): { server: McpServer; toolCount: number } {
-  const server = new McpServer({ name: 'carrefour-it', version: '3.0.0' });
+  // the commit in the version: an MCP client sees which code answers (serverVersion)
+  const server = new McpServer({ name: 'carrefour-it', version: `3.0.0${buildInfo().commit ? `+${buildInfo().commit}` : ''}` });
   registerSessionTools(server);
   registerCheckoutTools(server);
   registerListTools(server);
