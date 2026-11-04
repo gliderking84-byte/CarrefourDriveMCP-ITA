@@ -4,6 +4,7 @@ import { config } from 'dotenv';
 import { createServer } from './server.js';
 import { startKeepAlive } from './services/auth.service.js';
 import { browserService } from './services/browser.service.js';
+import { buildInfo } from './utils/build.js';
 import { logger } from './utils/logger.js';
 
 config();
@@ -18,14 +19,21 @@ async function main(): Promise<void> {
   // otherwise hit between two user requests.
   startKeepAlive();
 
+  const build = buildInfo();
+  logger.info('Carrefour MCP server starting', { version: process.env.npm_package_version, commit: build.commit });
+  if (build.stale) {
+    logger.warn('dist/ is older than src/: this is the OLD code. Run "npm run build" and restart the server.', { commit: build.commit });
+    process.stderr.write('[carrefour-it] WARNING: dist/ is older than src/ — the server runs the OLD code. Run "npm run build" and restart.\n');
+  }
+
   if (wantsHttp()) {
     const { startHttpServer, httpConfigFromEnv } = await import('./http/server.js');
     const http = await startHttpServer(httpConfigFromEnv());
-    process.stderr.write(`[carrefour-it] MCP server ready on ${http.mcpUrl}\n`);
+    process.stderr.write(`[carrefour-it] MCP server ready on ${http.mcpUrl}${build.commit ? ` (commit ${build.commit})` : ''}\n`);
   } else {
     const { server, toolCount } = createServer();
     await server.connect(new StdioServerTransport());
-    process.stderr.write(`[carrefour-it] MCP server ready — ${toolCount} API tools loaded\n`);
+    process.stderr.write(`[carrefour-it] MCP server ready — ${toolCount} API tools loaded${build.commit ? ` (commit ${build.commit})` : ''}\n`);
   }
 
   // The browser is a child process; leaving it behind would lock the profile.
