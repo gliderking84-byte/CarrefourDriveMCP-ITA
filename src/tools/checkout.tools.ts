@@ -239,6 +239,11 @@ function cardWarning(card: { url: string; fields: number; standaloneFields: numb
 
 /** The link to hand the user: PayPal (also behind the provider's page), else the provider's page, else `seu`. */
 async function paymentLinkFrom(page: string): Promise<{ url: string; paypal: boolean }> {
+  // 1. As the user does it on carrefour.it: the order's payment page (signed in, with Market Pay's
+  //    page inside, laid out as intended), "Paga" pressed there.
+  const viaCarrefour = await payPalBehind(page);
+  if (viaCarrefour) return { url: viaCarrefour, paypal: true };
+  // 2. Market Pay's page on its own (the link handed over if PayPal is not reached).
   let provider = '';
   try {
     provider = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
@@ -680,8 +685,12 @@ export function registerCheckoutTools(server: McpServer): void {
             renewedCard = await cardPage(page);
             paypalUrl = renewedCard.url || (await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS));
           } else {
-            paypalUrl = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
-            paypalUrl = (await payPalBehind(paypalUrl)) || paypalUrl;
+            // "Paga" pressed on carrefour.it's page first (as the user does), then on Market Pay's own page
+            paypalUrl = await payPalBehind(page);
+            if (!paypalUrl) {
+              paypalUrl = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
+              paypalUrl = (await payPalBehind(paypalUrl)) || paypalUrl;
+            }
           }
         } catch (error) {
           logger.info('renew_payment_link: no payment page', { order: order_number, error: String(error) });

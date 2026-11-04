@@ -351,29 +351,43 @@ class BrowserService {
     const popups: Page[] = [];
     const onPage = (p: Page) => popups.push(p);
     context.on('page', onPage);
-    const landed = (): string => [page, ...popups].map((p) => p.url()).find((u) => paypal.test(u)) ?? '';
+    // PayPal opens at the top (Market Pay sets window.top.location from its iframe) or in a popup
+    const landed = (): string =>
+      [page, ...popups].flatMap((p) => [p.url(), ...p.frames().map((f) => f.url())]).find((u) => paypal.test(u)) ?? '';
     const deadline = Date.now() + timeoutMs;
+    const seen: string[] = [];
+    let pressed = 0;
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs }).catch(() => undefined);
       if (landed()) return landed();
       await page.waitForLoadState('networkidle', { timeout: Math.min(8000, Math.max(0, deadline - Date.now())) }).catch(() => undefined);
+      // The buttons can sit in the page or in Market Pay's iframe (carrefour.it's page), and Market
+      // Pay's page opened on its own shows "Paga" twice (one of them does nothing): every visible
+      // match is tried, "Paga" first, each with a short wait.
       const label = /^\s*(paga|pay|procedi|prosegui|continua|conferma|confirm|continue|paypal)\b|paypal/i;
-      const candidates = page
-        .locator('button, input[type=submit], input[type=button], a[role=button], [role=button], [id*=paypal i], [class*=paypal i]');
-      const seen: string[] = [];
-      const count = Math.min(await candidates.count().catch(() => 0), 60);
-      for (let i = 0; i < count && Date.now() < deadline; i++) {
-        const el = candidates.nth(i);
-        if (!(await el.isVisible().catch(() => false))) continue;
-        const name = ((await el.innerText().catch(() => '')) || (await el.getAttribute('value').catch(() => '')) || (await el.getAttribute('aria-label').catch(() => '')) || (await el.getAttribute('id').catch(() => '')) || '').trim();
-        seen.push(name.slice(0, 30));
-        if (!label.test(name)) continue;
-        await el.click({ timeout: 5000 }).catch(() => undefined);
-        const until = Math.min(deadline, Date.now() + 12000);
-        while (Date.now() < until && !landed()) await page.waitForTimeout(250);
-        if (landed()) return landed();
+      const exact = /^\s*(paga|pay)\s*$/i;
+      const found: { el: ReturnType<Page['locator']>; name: string }[] = [];
+      for (const frame of page.frames()) {
+        const candidates = frame.locator('button, input[type=submit], input[type=button], a[role=button], [role=button], [id*=paypal i], [class*=paypal i]');
+        const count = Math.min(await candidates.count().catch(() => 0), 60);
+        for (let i = 0; i < count; i++) {
+          const el = candidates.nth(i);
+          if (!(await el.isVisible().catch(() => false))) continue;
+          const name = ((await el.innerText().catch(() => '')) || (await el.getAttribute('value').catch(() => '')) || (await el.getAttribute('aria-label').catch(() => '')) || (await el.getAttribute('id').catch(() => '')) || '').trim();
+          seen.push(name.slice(0, 30));
+          if (label.test(name)) found.push({ el, name });
+        }
       }
-      logger.info('The payment page has no button that leads to PayPal', { buttons: seen.filter(Boolean).slice(0, 10) });
+      found.sort((a, b) => Number(exact.test(b.name)) - Number(exact.test(a.name)));
+      for (const { el } of found) {
+        if (Date.now() >= deadline || landed()) break;
+        pressed++;
+        await el.click({ timeout: 4000 }).catch(() => undefined);
+        const until = Math.min(deadline, Date.now() + 7000);
+        while (Date.now() < until && !landed()) await page.waitForTimeout(250);
+      }
+      if (landed()) return landed();
+      logger.info('PayPal not reached from the payment page', { pressed, buttons: seen.filter(Boolean).slice(0, 10) });
       return '';
     } finally {
       context.off('page', onPage);
@@ -381,6 +395,7 @@ class BrowserService {
       await Promise.all([page, ...popups].map((p) => p.close().catch(() => undefined)));
     }
   }
+
 
   /** Mirror the browser's cookies back into the jar so status/refresh can read them. */
   async syncCookies(): Promise<void> {
