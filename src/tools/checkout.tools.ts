@@ -5,7 +5,8 @@ import { getCsrfToken } from '../services/auth.service.js';
 import { browserService } from '../services/browser.service.js';
 import { openInUserBrowser } from '../services/browser-login.js';
 import { SfccError, check, requireSignedIn, saveDebugPage, sfccHtml, sfccJson, type Json } from '../services/sfcc.service.js';
-import { extractCart, stripEnvelope, textOf } from '../spec/extract.js';
+import { extractCart, sfccError, stripEnvelope, textOf } from '../spec/extract.js';
+import { parseDeliverySelection } from './cart.tools.js';
 import { logger } from '../utils/logger.js';
 
 // Where carrefour.it's cart page shows what blocks the checkout.
@@ -235,6 +236,45 @@ function cardWarning(card: { url: string; fields: number; standaloneFields: numb
       : 'Warning: no card fields were found on the card page (CARD_FIELDS_NOT_FOUND). If the page shows no card form, pay from the server\'s screen or choose PayPal.',
     '',
   ];
+}
+
+const TIMESLOT_GONE =
+  'Order not placed — the timeslot is no longer reserved (a reservation lasts 45 minutes) (TIMESLOT_EXPIRED). ' +
+  'Run prepare_checkout again with the same slot: it reserves it again and shows the summary; then place_order. No order was created.';
+
+/** true / false = the session holds a timeslot or not; null = could not tell. */
+async function timeslotHeld(): Promise<boolean | null> {
+  try {
+    const sel = parseDeliverySelection(await sfccJson('GET', `${SFCC_BASE}/Store-ShowTimeslotReserved`));
+    if (!sel.method) return null;
+    return Boolean(sel.timeslot) && (sel.minutes_left === undefined || sel.minutes_left > 0);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Why /checkout/payment refused the order. SFCC often answers only `error: true`: what it
+ * carried is logged (keys, errorStage, cartError; no personal data) and the likely causes are
+ * checked — the timeslot reservation gone, or the basket sent back to the cart.
+ */
+async function orderFailure(raw: Json, message: string): Promise<SfccError> {
+  const body = raw as Record<string, unknown>;
+  const stage = body.errorStage && typeof body.errorStage === 'object' ? body.errorStage : undefined;
+  logger.info('Order refused by carrefour.it', { keys: Object.keys(body).slice(0, 20), errorStage: stage, cartError: body.cartError, redirect: typeof body.redirectUrl === 'string' ? new URL(body.redirectUrl, CARREFOUR_ORIGIN).pathname : undefined });
+  if ((await timeslotHeld()) === false) {
+    prepared = null;
+    return new SfccError(TIMESLOT_GONE.replace(/^Order not placed — /, ''));
+  }
+  if (body.cartError === true || (typeof body.redirectUrl === 'string' && /cart/i.test(body.redirectUrl))) {
+    prepared = null;
+    return new SfccError(
+      'carrefour.it sent the basket back to the cart (CART_CHANGED): products changed or are no longer available. ' +
+        'Check get_cart (unavailable_items, remove_unavailable_products), then prepare_checkout again. No order was created.'
+    );
+  }
+  const where = stage ? ` (stage: ${JSON.stringify(stage)})` : '';
+  return new SfccError(`Order: ${message}${where}. No order was created: run prepare_checkout again, then place_order.`);
 }
 
 /** The link to hand the user: PayPal (also behind the provider's page), else the provider's page, else `seu`. */
@@ -534,18 +574,25 @@ export function registerCheckoutTools(server: McpServer): void {
       const method: PaymentMethod = payment_method ?? 'MP_PAYPAL';
       try {
         await requireSignedIn();
-        const data = check(
-          'Order',
-          await sfccJson('POST', `${CARREFOUR_ORIGIN}/checkout/payment`, {
-            form: {
-              paymentOptions: method,
-              billingAddressEnabled: 'false',
-              orderNotes: order_notes ?? '',
-              csrf_token: await getCsrfToken(),
-              timeslotEnabled: 'true',
-            },
-          })
-        );
+        // The slot is held 45 minutes: without it carrefour.it answers the order with a bare
+        // "error: true". Checked first, so nothing is sent for an order that cannot be placed.
+        const before = await timeslotHeld();
+        if (before === false) {
+          prepared = null;
+          return text(TIMESLOT_GONE, true);
+        }
+        const raw = await sfccJson('POST', `${CARREFOUR_ORIGIN}/checkout/payment`, {
+          form: {
+            paymentOptions: method,
+            billingAddressEnabled: 'false',
+            orderNotes: order_notes ?? '',
+            csrf_token: await getCsrfToken(),
+            timeslotEnabled: 'true',
+          },
+        });
+        const failure = sfccError(raw);
+        if (failure) throw await orderFailure(raw, failure.message);
+        const data = raw;
         const redirectUrl = typeof data.redirectUrl === 'string' ? data.redirectUrl : '';
         if (!redirectUrl) throw new SfccError('carrefour.it did not return a payment page.');
         const orderNumber = new URL(redirectUrl).searchParams.get('orderNumber') ?? 'unknown';

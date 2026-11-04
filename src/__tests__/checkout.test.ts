@@ -522,6 +522,57 @@ test('place_order by card hands over the card page exactly as carrefour.it shows
   assert.match(none.text, /CARD_FIELDS_NOT_FOUND/);
 });
 
+test('place_order explains a bare "error: true" and never posts when the slot is gone', async () => {
+  const c = await client();
+  const posts = () => calls.filter((r) => new URL(r.url).pathname === '/checkout/payment').length;
+  let held = true;
+  let answer: unknown = { error: true };
+  respond = (req) => {
+    const path = new URL(req.url).pathname;
+    if (path.endsWith('Store-ShowTimeslotReserved'))
+      return held
+        ? { shippingMethodIdSelected: 'pickup_in_store', shippingSelectedCAP: '10040', storeIdSelected: '0551', timeslotReserved: 'Mercoledì 4 novembre | 18:00 - 20:00', minutesBeforeTimeslotExpiry: 20 }
+        : { shippingMethodIdSelected: 'pickup_in_store', shippingSelectedCAP: '10040', storeIdSelected: '0551' };
+    if (path === '/checkout/payment') {
+      held = held && answer !== 'slot-gone';
+      return answer === 'slot-gone' ? { error: true } : answer;
+    }
+    return happy(req);
+  };
+
+  // 1. slot gone before: nothing is posted
+  held = false;
+  assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+  held = false;
+  let res = await run(c, 'place_order', { confirm: true });
+  assert.equal(res.isError, true);
+  assert.match(res.text, /TIMESLOT_EXPIRED/);
+  assert.equal(posts(), 0, 'no order attempt without a slot');
+
+  // 2. bare error, slot gone right after
+  held = true;
+  assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+  answer = 'slot-gone';
+  res = await run(c, 'place_order', { confirm: true });
+  assert.match(res.text, /TIMESLOT_EXPIRED/);
+  assert.match(res.text, /No order was created/);
+
+  // 3. basket sent back to the cart
+  held = true;
+  answer = { error: true, cartError: true, redirectUrl: '/cart' };
+  assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+  res = await run(c, 'place_order', { confirm: true });
+  assert.match(res.text, /CART_CHANGED/);
+
+  // 4. bare error with the slot still held: what carrefour.it said, and how to go on
+  answer = { error: true, errorStage: { stage: 'payment', step: 'paymentInstrument' } };
+  assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+  res = await run(c, 'place_order', { confirm: true });
+  assert.match(res.text, /carrefour\.it reported an error/);
+  assert.match(res.text, /paymentInstrument/);
+  assert.match(res.text, /No order was created/);
+});
+
 test('place_order refuses an unknown payment method before creating anything', async () => {
   const c = await client();
   assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
