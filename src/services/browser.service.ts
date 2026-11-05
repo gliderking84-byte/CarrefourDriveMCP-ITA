@@ -246,6 +246,17 @@ class BrowserService {
     }
   }
 
+  /** The visible text of the page parked for `origin` ('' if there is none). */
+  async pageText(origin: string): Promise<string> {
+    const page = this.pages.get(origin);
+    if (!page || page.isClosed()) return '';
+    try {
+      return await page.evaluate(() => (document.body ? document.body.innerText : '') || '');
+    } catch {
+      return '';
+    }
+  }
+
   /** HTML and a screenshot of the page parked for `origin` (for debugging a page we cannot read). */
   async pageSnapshot(origin: string): Promise<{ html: string; png: Buffer | null } | null> {
     const page = this.pages.get(origin);

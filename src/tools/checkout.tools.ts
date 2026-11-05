@@ -176,6 +176,27 @@ export function summarizeOrder(order: OrderJson | undefined): Json {
   };
 }
 
+/**
+ * The pickup/delivery fee and the total to pay as carrefour.it shows them in the checkout summary
+ * ("TOTALE PRODOTTI € 31,78 · Spese di ritiro e sacchetti/cartoni € 0,24 · TOTALE € 32,02").
+ * Pickup has no JSON with the totals before the order exists: this reads the page text.
+ */
+export function feesFromPageText(textIn: string): Json {
+  const text = String(textIn || '').replace(/\u00a0/g, ' ');
+  const amount = (re: RegExp): string | undefined => {
+    const m = re.exec(text);
+    return m ? `€ ${m[1]}` : undefined;
+  };
+  const products = amount(/totale\s+prodotti\s*:?\s*€\s*([\d.]+,\d{2})/i);
+  const fee = amount(/spese\s+di\s+(?:ritiro|consegna|spedizione)[^€\n]*\n?[^€\n]*€\s*([\d.]+,\d{2})/i);
+  const feeLabel = /spese\s+di\s+(?:ritiro|consegna|spedizione)[^€\n]*/i.exec(text)?.[0].trim();
+  // the grand total: "TOTALE" not followed by "PRODOTTI"
+  const total = amount(/(?:^|\n|\s)totale(?!\s+prodotti)(?:\s+(?:da\s+pagare|ordine))?\s*:?\s*\n?\s*€\s*([\d.]+,\d{2})/i);
+  return Object.fromEntries(
+    Object.entries({ products_total: products, delivery_cost: fee, delivery_cost_label: feeLabel, total_to_pay: total }).filter(([, v]) => v !== undefined)
+  );
+}
+
 let prepared: { at: number; total: unknown; address: string; timeslot: string } | null = null;
 
 /** carrefour.it payment page of each order placed here (orderNumber → URL), for renew_payment_link. */
@@ -527,6 +548,23 @@ export function registerCheckoutTools(server: McpServer): void {
             },
           })
         );
+
+        // Pickup: the fee (pickup + bags) and the total to pay. From the slot answer when it carries the
+        // order, otherwise from the checkout page's summary; if neither has it, the products total stays.
+        if (pickup) {
+          const order = (slot.order ?? null) as OrderJson | null;
+          if (order && order.totals) {
+            const s = summarizeOrder(order);
+            summary = { ...summary, products_total: s.products_total ?? summary.products_total, delivery_cost: s.delivery_cost, total_to_pay: s.total_to_pay };
+          } else {
+            const fees = feesFromPageText(await browserService.pageText(CARREFOUR_ORIGIN));
+            logger.info('Pickup summary from the checkout page', fees);
+            if (fees.total_to_pay || fees.delivery_cost) {
+              summary = { ...summary, ...fees, products_total: fees.products_total ?? summary.products_total };
+              delete summary.note;
+            }
+          }
+        }
 
         const timeslot = typeof slot.timeslotDateFormatted === 'string' ? textOf(slot.timeslotDateFormatted) : '';
         const where = pickup

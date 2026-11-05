@@ -18,7 +18,7 @@ process.env.RATE_LIMIT_REQUESTS = '1000';
 const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
 const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
 const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
-const { registerCheckoutTools, resetPreparedCheckout, shippingForm } = await import('../tools/checkout.tools.js');
+const { registerCheckoutTools, resetPreparedCheckout, shippingForm, feesFromPageText } = await import('../tools/checkout.tools.js');
 const { browserService } = await import('../services/browser.service.js');
 const { sessionService } = await import('../services/session.service.js');
 const { forgetLoginState } = await import('../services/auth.service.js');
@@ -344,6 +344,33 @@ test('prepare_checkout for pickup reserves with the store CAP and submits no add
 
   const placed = await run(c, 'place_order', { confirm: true });
   assert.equal(placed.isError, false, placed.text);
+});
+
+test('feesFromPageText reads the pickup fee and the total from the checkout summary', () => {
+  const page = 'Ritiro in negozio\nLEINI\', 10040\nModifica\nTOTALE PRODOTTI\n€ 31,78\nSpesa Online (17)\n€ 31,78\nSpese di ritiro e sacchetti/cartoni\n€ 0,24\nTOTALE\n€ 32,02\nAggiungi prodotti\nCompleta ordine';
+  assert.deepEqual(feesFromPageText(page), {
+    products_total: '€ 31,78',
+    delivery_cost: '€ 0,24',
+    delivery_cost_label: 'Spese di ritiro e sacchetti/cartoni',
+    total_to_pay: '€ 32,02',
+  });
+  assert.deepEqual(feesFromPageText('Nessun riepilogo qui'), {});
+});
+
+test('prepare_checkout for pickup shows the pickup fee and the total to pay from the checkout page', async () => {
+  const originalText = browserService.pageText.bind(browserService);
+  browserService.pageText = async () => 'TOTALE PRODOTTI € 31,78\nSpese di ritiro e sacchetti/cartoni € 0,24\nTOTALE € 32,02';
+  try {
+    const c = await client();
+    const res = await run(c, 'prepare_checkout', { ...SLOT, shippingMethodId: 'pickup_in_store', storeId: '0551', store_cap: '10040', store_city: "LEINI'" });
+    assert.equal(res.isError, false, res.text);
+    const summary = JSON.parse(res.text.slice(0, res.text.indexOf('\n\nNothing')));
+    assert.equal(summary.delivery_cost, '€ 0,24');
+    assert.equal(summary.total_to_pay, '€ 32,02');
+    assert.equal('note' in summary, false);
+  } finally {
+    browserService.pageText = originalText;
+  }
 });
 
 test('prepare_checkout for pickup needs the store CAP and city', async () => {
