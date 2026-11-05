@@ -105,3 +105,47 @@ export async function ensureSignedIn(): Promise<'ok' | 'none' | 'guest' | 'unkno
   if (logged === null) return 'unknown';
   return (await tryGoogleRelogin()) ? 'ok' : 'guest';
 }
+
+/**
+ * CARREFOUR_RELOGIN_ON_START=1: check the session once the server has started
+ * and, when it has expired, sign in again through Google straight away rather
+ * than on the first request that needs it (which would then wait for it). After a
+ * reboot of the machine the server is thus ready before anyone asks. Needs
+ * CARREFOUR_GOOGLE_RELOGIN=1, since that is what signs in again.
+ */
+export function reloginOnStartEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CARREFOUR_RELOGIN_ON_START === '1';
+}
+
+/** The check itself; resolves to the session state, and never throws. */
+export async function checkSessionOnStart(): Promise<'ok' | 'none' | 'guest' | 'unknown' | 'disabled'> {
+  if (!reloginOnStartEnabled()) return 'disabled';
+  if (!googleReloginEnabled()) {
+    logger.warn('CARREFOUR_RELOGIN_ON_START=1 has no effect without CARREFOUR_GOOGLE_RELOGIN=1');
+    return 'disabled';
+  }
+  try {
+    const state = await ensureSignedIn();
+    if (state === 'ok') logger.info('Session checked at start: signed in');
+    else logger.warn('Session checked at start: not signed in', { state, note: lastReloginNote() });
+    return state;
+  } catch (error) {
+    logger.error('Session check at start failed', { error: String(error) });
+    return 'unknown';
+  }
+}
+
+/**
+ * Run checkSessionOnStart after `delayMs` (CARREFOUR_RELOGIN_ON_START_DELAY_MS,
+ * default 15 s: the network and the display come up with the container), without
+ * holding the process open.
+ */
+export function scheduleSessionCheckOnStart(
+  delayMs = parseInt(process.env.CARREFOUR_RELOGIN_ON_START_DELAY_MS || '15000', 10)
+): void {
+  if (!reloginOnStartEnabled()) return;
+  const timer = setTimeout(() => {
+    void checkSessionOnStart();
+  }, Number.isFinite(delayMs) && delayMs >= 0 ? delayMs : 15000);
+  timer.unref?.();
+}

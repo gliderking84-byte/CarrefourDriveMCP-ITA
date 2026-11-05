@@ -161,6 +161,9 @@ by the server; nothing is typed and no password is stored.
 - If Google wants you again (expired Google session, new-device check), the
   attempt fails, the tool says so, and you sign in once by hand. A failed attempt
   is not retried for 10 minutes.
+- `CARREFOUR_RELOGIN_ON_START=1` also checks the session when the server starts (after a
+  reboot, say) and signs in again right away if it expired, so the first request does not
+  wait for it. The keep-alive then keeps the session warm.
 - `CARREFOUR_GOOGLE_RELOGIN_HEADLESS=1` runs the attempt without a visible window
   (for a server without a desktop). Google may treat headless browsers with more
   suspicion: if attempts fail, run it with a window (e.g. under Xvfb).
@@ -509,6 +512,8 @@ See `.env.example`. Main variables:
 | `CARREFOUR_GOOGLE_RELOGIN` | off | `1`: sign in again through "Accedi con Google" when the session is lost |
 | `CARREFOUR_GOOGLE_RELOGIN_HEADLESS` | off | `1`: run that re-login without a visible window |
 | `CARREFOUR_GOOGLE_RELOGIN_TIMEOUT_MS` | `60000` | how long one Google re-login may take |
+| `CARREFOUR_RELOGIN_ON_START` | off | `1` (with `CARREFOUR_GOOGLE_RELOGIN=1`): check the session when the server starts and sign in again through Google at once if it expired, instead of on the first request |
+| `CARREFOUR_RELOGIN_ON_START_DELAY_MS` | `15000` | how long after start that check runs |
 | `CARREFOUR_NAV_TIMEOUT_MS` | `60000` | browser navigation timeout |
 | `CARREFOUR_USER_AGENT` | stock Chrome UA | UA of the transport browser |
 | `CARREFOUR_TOOLS_DIR` | `<project>/tools` | JSON tool definitions directory |

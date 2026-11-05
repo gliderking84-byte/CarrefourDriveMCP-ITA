@@ -18,7 +18,7 @@ const { loadToolSpecs } = await import('../spec/loader.js');
 const { browserService } = await import('../services/browser.service.js');
 const { sessionService } = await import('../services/session.service.js');
 const { forgetLoginState } = await import('../services/auth.service.js');
-const { relogin, resetRelogin } = await import('../services/relogin.service.js');
+const { relogin, resetRelogin, checkSessionOnStart } = await import('../services/relogin.service.js');
 
 const specs = new Map(loadToolSpecs().specs.map((s) => [s.name, s]));
 /** An authenticated read: any would do. */
@@ -218,4 +218,58 @@ test('Google re-login stays off unless enabled', async () => {
   } finally {
     relogin.run = originalRun;
   }
+});
+
+/** CARREFOUR_RELOGIN_ON_START with a scripted Google re-login; restores everything after. */
+async function onStart(env: Record<string, string>, signedInAtFirst: boolean) {
+  const keys = ['CARREFOUR_RELOGIN_ON_START', 'CARREFOUR_GOOGLE_RELOGIN'];
+  const saved = keys.map((k) => process.env[k]);
+  keys.forEach((k) => delete process.env[k]);
+  Object.assign(process.env, env);
+  resetRelogin();
+  const originalRun = relogin.run;
+  let signedIn = signedInAtFirst;
+  let attempts = 0;
+  relogin.run = async () => {
+    attempts += 1;
+    signedIn = true;
+    return 'Signed in.';
+  };
+  try {
+    sessionService.importCookies('dwsid=abc');
+    respond = (req) => (req.url.includes('Store-SelectionBar') ? selectionBar(signedIn) : json({}));
+    const state = await checkSessionOnStart();
+    return { state, attempts };
+  } finally {
+    relogin.run = originalRun;
+    keys.forEach((k, i) => (saved[i] === undefined ? delete process.env[k] : (process.env[k] = saved[i])));
+    resetRelogin();
+  }
+}
+
+test('re-login at start is off by default and touches nothing', async () => {
+  const { state, attempts } = await onStart({}, false);
+  assert.equal(state, 'disabled');
+  assert.equal(attempts, 0);
+  assert.equal(calls.length, 0);
+});
+
+test('re-login at start does nothing without Google re-login enabled', async () => {
+  const { state, attempts } = await onStart({ CARREFOUR_RELOGIN_ON_START: '1' }, false);
+  assert.equal(state, 'disabled');
+  assert.equal(attempts, 0);
+  assert.equal(calls.length, 0);
+});
+
+test('re-login at start signs in again through Google when the session has expired', async () => {
+  const { state, attempts } = await onStart({ CARREFOUR_RELOGIN_ON_START: '1', CARREFOUR_GOOGLE_RELOGIN: '1' }, false);
+  assert.equal(state, 'ok');
+  assert.equal(attempts, 1);
+});
+
+test('re-login at start leaves a live session alone', async () => {
+  const { state, attempts } = await onStart({ CARREFOUR_RELOGIN_ON_START: '1', CARREFOUR_GOOGLE_RELOGIN: '1' }, true);
+  assert.equal(state, 'ok');
+  assert.equal(attempts, 0);
+  assert.ok(calls.some((c) => c.url.includes('Store-SelectionBar')), 'the session was checked');
 });
