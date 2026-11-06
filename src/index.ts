@@ -4,6 +4,7 @@ import { config } from 'dotenv';
 import { createServer } from './server.js';
 import { startKeepAlive } from './services/auth.service.js';
 import { browserService } from './services/browser.service.js';
+import { scheduleSessionCheckOnStart } from './services/relogin.service.js';
 import { buildInfo } from './utils/build.js';
 import { logger } from './utils/logger.js';
 
@@ -35,6 +36,9 @@ async function main(): Promise<void> {
     await server.connect(new StdioServerTransport());
     process.stderr.write(`[carrefour-it] MCP server ready — ${toolCount} API tools loaded${build.commit ? ` (commit ${build.commit})` : ''}\n`);
   }
+
+  // With CARREFOUR_RELOGIN_ON_START=1, sign in again now rather than on the first request.
+  scheduleSessionCheckOnStart();
 
   // The browser is a child process; leaving it behind would lock the profile.
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
