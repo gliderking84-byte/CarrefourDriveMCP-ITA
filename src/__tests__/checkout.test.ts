@@ -302,12 +302,23 @@ test('place_order creates the order once and hands the payment page over', async
   assert.doesNotMatch(res.text, /Payment link \(PayPal/, 'no PayPal link when the redirect cannot be followed');
   // the provider page from `seu` comes first, never the carrefour.it page (a 404 without the session)
   assert.equal([...res.text.matchAll(/https?:\/\/\S+/g)].map((m) => m[0])[0], 'https://hpp.example/checkout');
-  assert.match(res.text, /payment page with PayPal — works on any device/);
+  assert.match(res.text, /Market Pay page: press "Paga" there/);
+  assert.match(res.text, /not opened on the server/);
 
   // A second call must not create a second order.
   const again = await run(c, 'place_order', { confirm: true });
   assert.equal(again.isError, true);
   assert.equal(calls.filter((r) => step(r) === 'payment').length, 1);
+});
+
+test('place_order with PayPal hands over the Market Pay page and presses nothing on the server', async () => {
+  const c = await client();
+  assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
+  const res = await run(c, 'place_order', { confirm: true });
+  assert.equal(res.isError, false, res.text);
+  assert.match(res.text, /https:\/\/hpp\.example\/checkout/);
+  assert.doesNotMatch(res.text, /paypal\.com/);
+  assert.match(res.text, /the whole payment must happen in the browser that opens this link/);
 });
 
 test('apply_coupon turns SFCC field errors into a tool error', async () => {
@@ -382,6 +393,8 @@ test('prepare_checkout for pickup needs the store CAP and city', async () => {
 });
 
 test('place_order hands over the PayPal link when carrefour.it redirects there', async () => {
+  process.env.CARREFOUR_PAYPAL_DIRECT = '1'; // old behaviour, still available
+  try {
   paypalLanding = 'https://www.paypal.com/checkoutnow?token=EC-TEST123';
   try {
     const c = await client();
@@ -395,9 +408,14 @@ test('place_order hands over the PayPal link when carrefour.it redirects there',
   } finally {
     paypalLanding = null;
   }
+  } finally {
+    delete process.env.CARREFOUR_PAYPAL_DIRECT;
+  }
 });
 
 test('place_order presses Paga on the provider page and hands over PayPal (the app on a phone)', async () => {
+  process.env.CARREFOUR_PAYPAL_DIRECT = '1'; // old behaviour, still available
+  try {
   paypalLanding = 'https://hpp2.prod.mpg.market-pay.com/hppv22/selection.hpp?sessionId=S1#pay=EWALLET_PAYPAL';
   paypalBehind = 'https://www.paypal.com/checkoutnow?token=EC-BEHIND';
   try {
@@ -411,9 +429,14 @@ test('place_order presses Paga on the provider page and hands over PayPal (the a
   } finally {
     paypalLanding = null;
   }
+  } finally {
+    delete process.env.CARREFOUR_PAYPAL_DIRECT;
+  }
 });
 
 test("place_order presses Paga on carrefour.it's payment page first, as the user does", async () => {
+  process.env.CARREFOUR_PAYPAL_DIRECT = '1'; // old behaviour, still available
+  try {
   paypalLanding = 'https://hpp2.prod.mpg.market-pay.com/hppv22/checkout.hpp?sessionId=S3';
   paypalViaCarrefour = 'https://www.paypal.com/checkoutnow?token=EC-VIA-CARREFOUR';
   try {
@@ -428,9 +451,14 @@ test("place_order presses Paga on carrefour.it's payment page first, as the user
   } finally {
     paypalLanding = null;
   }
+  } finally {
+    delete process.env.CARREFOUR_PAYPAL_DIRECT;
+  }
 });
 
 test('place_order keeps the provider page when PayPal is not reached behind it', async () => {
+  process.env.CARREFOUR_PAYPAL_DIRECT = '1'; // old behaviour, still available
+  try {
   paypalLanding = 'https://hpp2.prod.mpg.market-pay.com/hppv22/selection.hpp?sessionId=S2#pay=EWALLET_PAYPAL';
   try {
     const c = await client();
@@ -438,9 +466,12 @@ test('place_order keeps the provider page when PayPal is not reached behind it',
     const res = await run(c, 'place_order', { confirm: true });
     assert.equal(res.isError, false, res.text);
     assert.equal([...res.text.matchAll(/https?:\/\/\S+/g)].map((m) => m[0])[0], paypalLanding);
-    assert.match(res.text, /payment page with PayPal/);
+    assert.match(res.text, /Market Pay page: press "Paga" there/);
   } finally {
     paypalLanding = null;
+  }
+  } finally {
+    delete process.env.CARREFOUR_PAYPAL_DIRECT;
   }
 });
 
@@ -463,6 +494,8 @@ test('prepare_checkout reports what the cart page says when the checkout keeps b
 });
 
 test('renew_payment_link follows the order\'s payment page to a new PayPal link', async () => {
+  process.env.CARREFOUR_PAYPAL_DIRECT = '1'; // old behaviour, still available
+  try {
   const c = await client();
   assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
   const placed = await run(c, 'place_order', { confirm: true });
@@ -483,6 +516,9 @@ test('renew_payment_link follows the order\'s payment page to a new PayPal link'
   const gone = await run(c, 'renew_payment_link', { order_number: '03070001' });
   assert.equal(gone.isError, true);
   assert.match(gone.text, /no longer sends order 03070001 to PayPal/);
+  } finally {
+    delete process.env.CARREFOUR_PAYPAL_DIRECT;
+  }
 });
 
 test('renew_payment_link only accepts this order\'s carrefour.it payment page', async () => {
@@ -640,6 +676,8 @@ test('place_order by card returns a payment block a PWA can open', async () => {
 });
 
 test('place_order with PayPal returns the PayPal link and its 3-hour validity in the block', async () => {
+  process.env.CARREFOUR_PAYPAL_DIRECT = '1'; // old behaviour, still available
+  try {
   const c = await client();
   assert.equal((await run(c, 'prepare_checkout', SLOT)).isError, false);
   paypalBehind = 'https://www.paypal.com/checkoutnow?token=EC-1';
@@ -656,6 +694,9 @@ test('place_order with PayPal returns the PayPal link and its 3-hour validity in
     assert.equal(renewed.provider, 'paypal');
   } finally {
     paypalLanding = null;
+  }
+  } finally {
+    delete process.env.CARREFOUR_PAYPAL_DIRECT;
   }
 });
 
