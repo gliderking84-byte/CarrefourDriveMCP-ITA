@@ -299,6 +299,29 @@ async function orderFailure(raw: Json, message: string): Promise<SfccError> {
 }
 
 /** The link to hand the user: PayPal (also behind the provider's page), else the provider's page, else `seu`. */
+/**
+ * The link the user pays with, for PayPal: Market Pay's own page (the `seu` of the carrefour.it
+ * payment page), NOT PayPal. The whole payment must happen in ONE browser: PayPal sends the user
+ * back to Market Pay, which needs the session of the browser that opened it. When the server's
+ * browser pressed "Paga" and the user approved PayPal on the phone, the phone came back to Market
+ * Pay without that session, carrefour.it showed "ops", the order was never confirmed (PayPal kept
+ * only an authorisation) and carrefour.it restored the cart. Nothing is opened or pressed here.
+ * CARREFOUR_PAYPAL_DIRECT=1 restores the old behaviour (PayPal link pressed on the server).
+ */
+async function providerLinkFrom(page: string): Promise<{ url: string; paypal: boolean }> {
+  if (process.env.CARREFOUR_PAYPAL_DIRECT === '1') return paymentLinkFrom(page);
+  const provider = providerPageOf(page);
+  if (provider) return { url: provider, paypal: false };
+  // no `seu`: where the payment page goes, without pressing anything there
+  try {
+    const url = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
+    return { url, paypal: PAYPAL_URL.test(url) };
+  } catch (error) {
+    logger.info('The payment page did not leave carrefour.it', { error: String(error) });
+    return { url: '', paypal: false };
+  }
+}
+
 async function paymentLinkFrom(page: string): Promise<{ url: string; paypal: boolean }> {
   // 1. As the user does it on carrefour.it: the order's payment page (signed in, with Market Pay's
   //    page inside, laid out as intended), "Paga" pressed there.
@@ -683,10 +706,13 @@ export function registerCheckoutTools(server: McpServer): void {
 
         // carrefour.it sends the payment page on to PayPal. The PayPal URL carries its own token, so
         // it works on any device and opens the PayPal app on a phone: hand that over when we can.
-        const pay = await paymentLinkFrom(redirectUrl);
-        const paypalUrl = pay.url; // PayPal, or the provider's page where the user picks PayPal
+        const pay = await providerLinkFrom(redirectUrl);
+        const paypalUrl = pay.url; // Market Pay's page: the user presses "Paga" there and goes on to PayPal
 
-        const window = openInUserBrowser(paypalUrl || redirectUrl);
+        // Not opened on the server: the payment must start and end in the user's browser (see providerLinkFrom)
+        const window = process.env.CARREFOUR_PAYPAL_DIRECT === '1'
+          ? openInUserBrowser(paypalUrl || redirectUrl)
+          : { opened: false, browser: 'none', error: "the payment is completed in the user's own browser" };
         logger.info('Order placed, payment page handed to the user', { orderNumber, browser: window.browser, provider: Boolean(paypalUrl) });
         return paymentResult(
           [
@@ -695,13 +721,15 @@ export function registerCheckoutTools(server: McpServer): void {
             ...(paypalUrl
               ? [pay.paypal
                   ? 'Payment link (PayPal — opens the PayPal app on a phone, works on any device):'
-                  : 'Payment link (payment page with PayPal — works on any device, no carrefour.it sign-in needed):', paypalUrl, '']
+                  : 'Payment link (Market Pay page: press "Paga" there, then approve on PayPal — the whole payment must happen in the browser that opens this link; works on any device, no carrefour.it sign-in needed):', paypalUrl, '']
               : []),
             window.opened
               ? process.env.CARREFOUR_DESK_URL
                 ? `The payment page is open on the server's screen (${process.env.CARREFOUR_DESK_URL}). Pay there, or open this link:`
                 : `The payment page is open in ${window.browser}. Complete the payment there (PayPal sign-in and checks).`
-              : `Could not open a browser (${window.error}). Open this link to pay:`,
+              : process.env.CARREFOUR_PAYPAL_DIRECT === '1'
+                ? `Could not open a browser (${window.error}). Open this link to pay:`
+                : 'Open this link in the browser where the user pays (not opened on the server):',
             paypalUrl || redirectUrl,
             '',
             `PayPal links expire ${PAYPAL_LINK_HOURS} hours after they are issued. For a new one, call renew_payment_link with this order number (carrefour.it payment page: ${redirectUrl}).`,
@@ -770,11 +798,17 @@ export function registerCheckoutTools(server: McpServer): void {
             renewedCard = await cardPage(page);
             paypalUrl = renewedCard.url || (await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS));
           } else {
-            // "Paga" pressed on carrefour.it's page first (as the user does), then on Market Pay's own page
-            paypalUrl = await payPalBehind(page);
-            if (!paypalUrl) {
-              paypalUrl = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
-              paypalUrl = (await payPalBehind(paypalUrl)) || paypalUrl;
+            if (process.env.CARREFOUR_PAYPAL_DIRECT === '1') {
+              // old behaviour: "Paga" pressed on carrefour.it's page, then on Market Pay's own page
+              paypalUrl = await payPalBehind(page);
+              if (!paypalUrl) {
+                paypalUrl = await browserService.followRedirect(page, OFF_CARREFOUR, PAYPAL_REDIRECT_TIMEOUT_MS);
+                paypalUrl = (await payPalBehind(paypalUrl)) || paypalUrl;
+              }
+            } else {
+              // Market Pay's page, opened and paid in the user's browser (see providerLinkFrom)
+              paypalUrl = (await providerLinkFrom(page)).url;
+              if (!paypalUrl) throw new SfccError('no payment page');
             }
           }
         } catch (error) {
